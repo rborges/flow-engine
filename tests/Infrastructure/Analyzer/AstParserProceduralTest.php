@@ -140,6 +140,69 @@ final class AstParserProceduralTest extends TestCase
         $this->assertSame('func:formatarCpf', $calls[0]->to());
     }
 
+    public function test_require_vira_aresta_include_para_o_arquivo_alvo(): void
+    {
+        $this->write('classes/AuthModel.php', <<<'PHP'
+        <?php
+        class AuthModel {}
+        PHP);
+
+        $file = $this->write('login.php', <<<'PHP'
+        <?php
+        require_once 'classes/AuthModel.php';
+        PHP);
+
+        $result = $this->parser->parse($file);
+
+        $includes = array_values(array_filter(
+            $result['edges'],
+            fn($e) => $e->type() === 'include'
+        ));
+
+        $this->assertCount(1, $includes);
+        $this->assertSame('file:login.php', $includes[0]->from());
+        $this->assertSame('file:classes/AuthModel.php', $includes[0]->to());
+        $this->assertSame('require_once', $includes[0]->method());
+    }
+
+    public function test_include_com_dirname_file_e_resolvido(): void
+    {
+        $this->write('classes/AuthModel.php', '<?php class AuthModel {}');
+
+        $file = $this->write('login.php', <<<'PHP'
+        <?php
+        require dirname(__FILE__) . '/classes/AuthModel.php';
+        include __DIR__ . '/classes/AuthModel.php';
+        PHP);
+
+        $result = $this->parser->parse($file);
+
+        $targets = array_map(
+            fn($e) => $e->to(),
+            array_filter($result['edges'], fn($e) => $e->type() === 'include')
+        );
+
+        $this->assertSame(
+            ['file:classes/AuthModel.php', 'file:classes/AuthModel.php'],
+            array_values($targets)
+        );
+    }
+
+    public function test_include_dinamico_e_ignorado(): void
+    {
+        $file = $this->write('roteador.php', <<<'PHP'
+        <?php
+        $pagina = $_GET['p'];
+        include $pagina . '.php';
+        PHP);
+
+        $result = $this->parser->parse($file);
+
+        $includes = array_filter($result['edges'], fn($e) => $e->type() === 'include');
+
+        $this->assertCount(0, $includes, 'Inventar um alvo seria pior que omitir a aresta');
+    }
+
     public function test_id_do_no_de_arquivo_e_relativo_a_raiz(): void
     {
         $file = $this->write('classes/bootstrap.php', <<<'PHP'

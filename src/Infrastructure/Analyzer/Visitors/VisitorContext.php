@@ -93,8 +93,19 @@ final class VisitorContext
     public function __construct(
         private readonly string $file,
         private readonly NodeFactory $nodeFactory,
-        private readonly ?string $fileNodeId = null
+        private readonly ?string $fileNodeId = null,
+        private readonly ?string $projectRoot = null
     ) {}
+
+    /**
+     * Raiz do projeto — usada para resolver includes e manter IDs relativos.
+     *
+     * @internal
+     */
+    public function projectRoot(): ?string
+    {
+        return $this->projectRoot;
+    }
 
     /**
      * ID do nó-arquivo, ou null se este arquivo não é um script.

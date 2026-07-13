@@ -15,6 +15,7 @@ use FlowEngine\Infrastructure\Analyzer\ProjectScanner;
 use FlowEngine\Infrastructure\Analyzer\FileParser;
 use FlowEngine\Infrastructure\Analyzer\FlowBuilder;
 use FlowEngine\Infrastructure\Analyzer\CrossLanguageEdgeDetector;
+use FlowEngine\Infrastructure\Analyzer\ProjectRelativePath;
 use FlowEngine\Infrastructure\Cache\FlowCache;
 use FlowEngine\Infrastructure\Cache\PerFileCache;
 
@@ -122,6 +123,8 @@ final class AstFlowRepository implements FlowRepository
 
         $this->perFileCache?->save($newMap);
 
+        $nodes = $this->materializeIncludedFiles($nodes, $edges, $files);
+
         if ($this->crossLanguageDetector !== null) {
             $edges = $this->crossLanguageDetector->detect($nodes, $edges);
         }
@@ -134,6 +137,61 @@ final class AstFlowRepository implements FlowRepository
             $this->cache->saveFlow($this->flow, $files, $configPath, $this->duplicateIds);
             $this->cacheHash = $this->cache->computeHash($files, $configPath);
         }
+    }
+
+    /**
+     * Cria o nó-arquivo dos alvos de include que ainda não têm um.
+     *
+     * O parser só emite nó-arquivo para scripts (código executável de topo), mas
+     * `require 'classes/AuthModel.php'` aponta para um arquivo de declaração pura.
+     * Sem este passo a aresta apontaria para o vazio — e a dependência real de um
+     * script sobre o arquivo que ele carrega se perderia.
+     *
+     * Só materializa arquivos que estão no escopo do scan: includes de vendor ou
+     * de fora do projeto continuam sem nó, e o FlowBuilder descarta suas arestas.
+     *
+     * @param Node[]   $nodes
+     * @param Edge[]   $edges
+     * @param string[] $files Arquivos escaneados (caminhos absolutos)
+     * @return Node[]
+     */
+    private function materializeIncludedFiles(array $nodes, array $edges, array $files): array
+    {
+        $existing = [];
+        foreach ($nodes as $node) {
+            $existing[$node->id()] = true;
+        }
+
+        $root = $this->context->rootPath();
+        $scanned = [];
+        foreach ($files as $file) {
+            $scanned['file:' . ProjectRelativePath::for($file, $root)] = $file;
+        }
+
+        $created = [];
+        foreach ($edges as $edge) {
+            if ($edge->type() !== 'include') {
+                continue;
+            }
+
+            $target = $edge->to();
+
+            if (isset($existing[$target]) || isset($created[$target]) || !isset($scanned[$target])) {
+                continue;
+            }
+
+            $created[$target] = new Node(
+                substr($target, strlen('file:')),
+                '__file',
+                $scanned[$target],
+                null,
+                'php',
+                null,
+                Node::TYPE_FILE
+            );
+        }
+
+        return array_merge($nodes, array_values($created));
     }
 
     private function parserSignature(): string

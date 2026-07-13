@@ -49,11 +49,12 @@ final class FlowBuilder
 
         $deduped = $this->dedupeById($nodes);
 
-        return new Flow($deduped, $this->resolveFunctionCalls($deduped, $edges), $symbols);
+        return new Flow($deduped, $this->resolveEdges($deduped, $edges), $symbols);
     }
 
     /**
-     * Resolve — ou descarta — as arestas function_call.
+     * Resolve — ou descarta — as arestas cujo alvo só pode ser validado com o
+     * grafo inteiro em mãos: function_call e include.
      *
      * Ao visitar a chamada não há como saber se a função é nativa do PHP
      * (str_replace), vem de um arquivo fora do scan (vendor) ou é do projeto.
@@ -72,7 +73,7 @@ final class FlowBuilder
      * @param \FlowEngine\Domain\Flow\Edge[] $edges
      * @return \FlowEngine\Domain\Flow\Edge[]
      */
-    private function resolveFunctionCalls(array $nodes, array $edges): array
+    private function resolveEdges(array $nodes, array $edges): array
     {
         $ids = [];
         foreach ($nodes as $node) {
@@ -82,6 +83,15 @@ final class FlowBuilder
         $resolved = [];
 
         foreach ($edges as $edge) {
+            // include para fora do escopo do scan (vendor, arquivo não analisado):
+            // o alvo não virou nó, então a aresta não tem o que ligar.
+            if ($edge->type() === 'include') {
+                if (isset($ids[$edge->to()])) {
+                    $resolved[] = $edge;
+                }
+                continue;
+            }
+
             if ($edge->type() !== 'function_call') {
                 $resolved[] = $edge;
                 continue;

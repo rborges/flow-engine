@@ -8,6 +8,7 @@ use FlowEngine\Domain\Flow\NodeFactory;
 use FlowEngine\Infrastructure\Analyzer\Visitors\ClassVisitor;
 use FlowEngine\Infrastructure\Analyzer\Visitors\FreeFunctionVisitor;
 use FlowEngine\Infrastructure\Analyzer\Visitors\FunctionCallVisitor;
+use FlowEngine\Infrastructure\Analyzer\Visitors\IncludeVisitor;
 use FlowEngine\Infrastructure\Analyzer\Visitors\LocalAssignVisitor;
 use FlowEngine\Infrastructure\Analyzer\Visitors\MethodCallVisitor;
 use FlowEngine\Infrastructure\Analyzer\Visitors\MethodVisitor;
@@ -72,6 +73,7 @@ final class AstParser implements FileParser
             new MethodCallVisitor(),
             new StaticCallVisitor(),
             new FunctionCallVisitor(),
+            new IncludeVisitor(),
             new HttpFacadeCallVisitor(),
             new PropertyAccessVisitor(),
             new StaticPropertyVisitor(),
@@ -132,16 +134,18 @@ final class AstParser implements FileParser
         // Um arquivo só vira nó quando é um "script": tem código executável de topo
         // ou declara funções livres. Arquivos que apenas declaram classes continuam
         // fora do grafo, o que mantém o resultado de projetos modernos inalterado.
+        $relativePath = ProjectRelativePath::for($file, $this->projectRoot);
+
         $fileNodeId = $this->isScript($ast)
-            ? 'file:' . $this->relativePath($file)
+            ? 'file:' . $relativePath
             : null;
 
         // Criar contexto compartilhado
-        $context = new VisitorContext($file, $this->nodeFactory, $fileNodeId);
+        $context = new VisitorContext($file, $this->nodeFactory, $fileNodeId, $this->projectRoot);
 
         if ($fileNodeId !== null) {
             $context->addNode($this->nodeFactory->create(
-                class: $this->relativePath($file),
+                class: $relativePath,
                 method: '__file',
                 file: $file,
                 line: null,
@@ -207,27 +211,6 @@ final class AstParser implements FileParser
         }
 
         return false;
-    }
-
-    /**
-     * Caminho relativo à raiz do projeto, com barras normalizadas — os IDs de nó
-     * precisam ser estáveis entre máquinas.
-     */
-    private function relativePath(string $file): string
-    {
-        $normalized = str_replace('\\', '/', $file);
-
-        if ($this->projectRoot === null) {
-            return $normalized;
-        }
-
-        $root = rtrim(str_replace('\\', '/', $this->projectRoot), '/') . '/';
-
-        if (str_starts_with($normalized, $root)) {
-            return substr($normalized, strlen($root));
-        }
-
-        return $normalized;
     }
 
     /**
