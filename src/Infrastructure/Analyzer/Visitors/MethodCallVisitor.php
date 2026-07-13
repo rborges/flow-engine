@@ -41,7 +41,7 @@ final class MethodCallVisitor implements NodeVisitor
     {
         /** @var Node\Expr\MethodCall $node */
         
-        if (!$context->isInsideMethod()) {
+        if ($context->currentNodeId() === null) {
             return;
         }
 

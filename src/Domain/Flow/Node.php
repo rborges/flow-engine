@@ -19,6 +19,15 @@ use FlowEngine\Domain\Node\NodeVisibility;
  */
 final class Node
 {
+    /** Método de uma classe (Class::method) — o tipo histórico e default. */
+    public const TYPE_METHOD = 'method';
+
+    /** Função livre declarada fora de qualquer classe. */
+    public const TYPE_FUNCTION = 'function';
+
+    /** Arquivo com código executável de topo (script procedural). */
+    public const TYPE_FILE = 'file';
+
     private ?NodeVisibility $visibility = null;
 
     /**
@@ -38,26 +47,47 @@ final class Node
         private readonly string $file,
         private readonly ?int $line,
         private readonly string $language = 'php',
-        private readonly ?array $metadata = null
+        private readonly ?array $metadata = null,
+        private readonly string $type = self::TYPE_METHOD
     ) {}
 
     /**
-     * Identificador único do nó (Class::method).
-     * 
+     * Identificador único do nó.
+     *
+     * - method:   Class::method            (PHP) / lang:Class::method (demais)
+     * - function: func:Namespace\nome      (classe vazia = função global)
+     * - file:     file:caminho/relativo.php
+     *
      * IMPORTANTE: Este ID deve ser único dentro de um Flow.
      * Duplicatas indicam problema no scan ou na estrutura do projeto.
-     * 
+     *
      * @api
      */
     public function id(): string
     {
-        $base = $this->class . '::' . $this->method;
+        $base = match ($this->type) {
+            self::TYPE_FILE     => 'file:' . $this->class,
+            self::TYPE_FUNCTION => 'func:' . ($this->class !== ''
+                ? $this->class . '\\' . $this->method
+                : $this->method),
+            default             => $this->class . '::' . $this->method,
+        };
 
         if ($this->language === 'php') {
             return $base;
         }
 
         return $this->language . ':' . $base;
+    }
+
+    /**
+     * Tipo do nó: method, function ou file.
+     *
+     * @api
+     */
+    public function type(): string
+    {
+        return $this->type;
     }
 
     /**
@@ -166,7 +196,8 @@ final class Node
      */
     public function validate(): void
     {
-        if (empty($this->class)) {
+        // Funções globais não têm classe; para os demais tipos ela é obrigatória.
+        if (empty($this->class) && $this->type !== self::TYPE_FUNCTION) {
             throw new \InvalidArgumentException('Node class cannot be empty');
         }
 

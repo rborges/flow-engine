@@ -42,7 +42,7 @@ final class StaticCallVisitor implements NodeVisitor
     {
         /** @var Node\Expr\StaticCall $node */
         
-        if (!$context->isInsideMethod()) {
+        if ($context->currentNodeId() === null) {
             return;
         }
 

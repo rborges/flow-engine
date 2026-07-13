@@ -85,7 +85,7 @@ final class LanguageSupportCatalog
     {
         return [
             'simple' => [
-                'php' => new AstParser($nodeFactory),
+                'php' => new AstParser($nodeFactory, $projectRoot),
                 'py'  => new PythonParser($nodeFactory, $projectRoot),
                 'ts'  => new TypeScriptParser($nodeFactory, $projectRoot, 'typescript'),
                 'tsx' => new TypeScriptParser($nodeFactory, $projectRoot, 'typescript'),

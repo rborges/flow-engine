@@ -30,7 +30,7 @@ final class LocalAssignVisitor implements NodeVisitor
     {
         /** @var Node\Expr\Assign $node */
 
-        if (!$context->isInsideMethod()) {
+        if ($context->currentNodeId() === null) {
             return;
         }
 

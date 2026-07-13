@@ -47,7 +47,7 @@ final class WordPressHookVisitor implements NodeVisitor
     {
         /** @var Node\Expr\FuncCall $node */
 
-        if (!$context->isInsideMethod()) {
+        if ($context->currentNodeId() === null) {
             return;
         }
 

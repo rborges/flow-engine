@@ -42,7 +42,7 @@ final class PropertyAccessVisitor implements NodeVisitor
     {
         /** @var Node\Expr\PropertyFetch $node */
         
-        if (!$context->isInsideMethod()) {
+        if ($context->currentNodeId() === null) {
             return;
         }
 

@@ -42,7 +42,7 @@ final class StaticPropertyVisitor implements NodeVisitor
     {
         /** @var Node\Expr\StaticPropertyFetch $node */
         
-        if (!$context->isInsideMethod()) {
+        if ($context->currentNodeId() === null) {
             return;
         }
 

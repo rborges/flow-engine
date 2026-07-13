@@ -42,6 +42,9 @@ final class VisitorContext
     /** Método atual sendo processado */
     private ?string $currentMethod = null;
 
+    /** Função livre atual (declarada fora de classe), se houver */
+    private ?string $currentFunction = null;
+
     /** @var string[] Traits usados pela classe atual */
     private array $currentTraits = [];
 
@@ -83,10 +86,25 @@ final class VisitorContext
      */
     private array $localVariableTypes = [];
 
+    /**
+     * @param string|null $fileNodeId ID do nó-arquivo deste arquivo (null quando o
+     *                                arquivo não tem código executável de topo).
+     */
     public function __construct(
         private readonly string $file,
-        private readonly NodeFactory $nodeFactory
+        private readonly NodeFactory $nodeFactory,
+        private readonly ?string $fileNodeId = null
     ) {}
+
+    /**
+     * ID do nó-arquivo, ou null se este arquivo não é um script.
+     *
+     * @internal
+     */
+    public function fileNodeId(): ?string
+    {
+        return $this->fileNodeId;
+    }
 
     // ==========================================
     // Getters de Estado
@@ -138,19 +156,57 @@ final class VisitorContext
     }
 
     /**
-     * Retorna ID atual (Class::method).
+     * ID do nó que "contém" o ponto atual da AST — a origem de qualquer aresta.
+     *
+     * Escopo de método   → Class::method
+     * Escopo de função   → func:Namespace\nome
+     * Escopo de arquivo  → file:caminho/relativo.php (o nó-arquivo)
+     *
+     * Retorna null dentro do corpo de uma classe mas fora de um método
+     * (defaults de propriedade, constantes de classe): nesse caso não há
+     * origem de chamada, e nenhuma aresta deve ser emitida.
      *
      * @internal
      */
     public function currentNodeId(): ?string
     {
-        $class = $this->currentClass();
+        // Qualquer corpo de classe — inclusive anônima, onde currentClass() é null —
+        // mantém o comportamento histórico: só há origem dentro de um método nomeado.
+        if ($this->classStack !== []) {
+            if (!$this->isInsideClass() || $this->currentMethod === null) {
+                return null;
+            }
 
-        if (!$class || !$this->currentMethod) {
-            return null;
+            return $this->currentClass() . '::' . $this->currentMethod;
         }
 
-        return $class . '::' . $this->currentMethod;
+        if ($this->currentFunction !== null) {
+            return 'func:' . ($this->currentNamespace !== null
+                ? $this->currentNamespace . '\\' . $this->currentFunction
+                : $this->currentFunction);
+        }
+
+        return $this->fileNodeId;
+    }
+
+    /**
+     * @internal
+     */
+    public function currentFunction(): ?string
+    {
+        return $this->currentFunction;
+    }
+
+    /**
+     * Entra (nome) ou sai (null) de uma função livre.
+     *
+     * @internal
+     */
+    public function setFunction(?string $function): void
+    {
+        $this->currentFunction = $function;
+        // Escopo local próprio, como em setMethod().
+        $this->localVariableTypes = [];
     }
 
     /**

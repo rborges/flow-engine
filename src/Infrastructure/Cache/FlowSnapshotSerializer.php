@@ -69,7 +69,10 @@ final class FlowSnapshotSerializer implements FlowSnapshotExporterPort
             $language = $nodeData['language'] ?? null;
             $id = (string) ($nodeData['id'] ?? '');
 
-            if (!$class || !$method) {
+            // Só reconstrói a partir do ID quando os campos estão AUSENTES (payload
+            // antigo). Uma função global tem classe vazia — e string vazia é falsy —,
+            // então testar por falsy aqui corromperia o nó para "func:func:nome\".
+            if ($class === null || $method === null) {
                 [$class, $method] = explode('::', $id) + ['', ''];
 
                 if ($language === null) {
@@ -82,7 +85,11 @@ final class FlowSnapshotSerializer implements FlowSnapshotExporterPort
             }
 
             if ($language === null) {
-                if (preg_match('/^([a-z]+):/', $id, $m)) {
+                // "func:" e "file:" são prefixos de tipo, não de linguagem.
+                if (!str_starts_with($id, 'func:')
+                    && !str_starts_with($id, 'file:')
+                    && preg_match('/^([a-z]+):/', $id, $m)
+                ) {
                     $language = $m[1];
                 } else {
                     $language = 'php';
@@ -97,7 +104,8 @@ final class FlowSnapshotSerializer implements FlowSnapshotExporterPort
                 $nodeData['file'] ?? '',
                 $nodeData['line'] ?? null,
                 $language,
-                $metadata
+                $metadata,
+                $nodeData['type'] ?? Node::TYPE_METHOD
             );
 
             if (!empty($nodeData['visibility'])) {

@@ -5,41 +5,29 @@ namespace FlowEngine\Infrastructure\Analyzer\Visitors;
 use PhpParser\Node;
 
 /**
- * Detecta chamadas a funções globais ou do namespace.
- * 
- * NOVO em v3.1
- * 
+ * Detecta chamadas a funções livres (globais ou de namespace).
+ *
  * Exemplos:
- * - var_dump($var)
- * - array_map(...)
  * - custom_helper($data)
  * - Namespace\function_name()
- * 
+ *
  * Formato da edge:
- * - From: CurrentClass::currentMethod
- * - To: ::function_name (global) ou Namespace::function_name
+ * - From: nó corrente (método, função ou arquivo)
+ * - To:   func:nome  /  func:Namespace\nome
  * - Type: function_call
- * 
+ *
+ * Chamadas a funções nativas do PHP (str_replace, count, ...) e a funções de
+ * arquivos fora do escopo do scan geram arestas para alvos inexistentes; o
+ * FlowBuilder as descarta ao construir o grafo. Isso evita manter aqui uma
+ * lista de builtins sempre incompleta.
+ *
  * Limitações:
- * - Não detecta funções dinâmicas: $func()
- * - Não rastreia funções builtin (array_map, etc) por padrão
- * 
+ * - Não detecta chamadas dinâmicas: $func()
+ *
  * @internal
  */
 final class FunctionCallVisitor implements NodeVisitor
 {
-    /** @var string[] Funções builtin para ignorar */
-    private const BUILTIN_FUNCTIONS = [
-        'var_dump', 'print_r', 'echo', 'die', 'exit',
-        'isset', 'empty', 'unset', 'count', 'sizeof',
-        'is_array', 'is_string', 'is_int', 'is_bool',
-        'array_map', 'array_filter', 'array_reduce',
-        'array_keys', 'array_values', 'array_merge',
-        'explode', 'implode', 'str_replace', 'preg_match',
-        'file_get_contents', 'file_put_contents',
-        'json_encode', 'json_decode',
-    ];
-
     /**
      * @internal
      */
@@ -54,8 +42,10 @@ final class FunctionCallVisitor implements NodeVisitor
     public function enter(Node $node, VisitorContext $context): void
     {
         /** @var Node\Expr\FuncCall $node */
-        
-        if (!$context->isInsideMethod()) {
+
+        $fromId = $context->currentNodeId();
+
+        if ($fromId === null) {
             return;
         }
 
@@ -66,30 +56,17 @@ final class FunctionCallVisitor implements NodeVisitor
 
         $functionName = $node->name->toString();
 
-        // Ignorar funções builtin (opcional - pode ser configurável)
-        if (in_array(strtolower($functionName), self::BUILTIN_FUNCTIONS)) {
-            return;
-        }
-
-        // Resolver FQN se necessário
         if (str_contains($functionName, '\\')) {
-            // Já é FQN
-            $fqn = $functionName;
+            $fqn = ltrim($functionName, '\\');
         } elseif ($context->currentNamespace()) {
-            // Adicionar namespace atual
             $fqn = $context->currentNamespace() . '\\' . $functionName;
         } else {
-            // Função global
             $fqn = $functionName;
         }
-
-        // Criar edge
-        $fromId = $context->currentNodeId();
-        $toId = '::' . $fqn; // :: prefix indica função (não método)
 
         $context->addEdge(new \FlowEngine\Domain\Flow\Edge(
             $fromId,
-            $toId,
+            'func:' . $fqn,
             $functionName,
             'function_call'
         ));

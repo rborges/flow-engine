@@ -8,7 +8,10 @@ use FlowEngine\Infrastructure\Paths\StateDirectory;
 
 final class FlowCache
 {
-    private const SCHEMA_VERSION = 'v4.43.0';
+    // v4.44.0: nós de arquivo/função e arestas a partir de código procedural.
+    // O hash não cobre o código do analisador, então mudanças de formato de nó
+    // exigem bump manual — sem isso um grafo antigo é servido em silêncio.
+    private const SCHEMA_VERSION = 'v4.44.0';
 
     private string $cacheDir;
     private string $flowFile;

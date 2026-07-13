@@ -99,13 +99,18 @@ final class AstParserRefactoredTest extends TestCase
         // 2 nodes
         $this->assertCount(2, $result['nodes']);
 
-        // 1 edge (getName -> Helper::format)
-        $this->assertCount(1, $result['edges']);
+        // 1 static_call edge (getName -> Helper::format).
+        // O parser também emite a chamada a strtoupper() como function_call; ela é
+        // descartada pelo FlowBuilder por não ter nó correspondente.
+        $staticCalls = array_values(array_filter(
+            $result['edges'],
+            fn($e) => $e->type() === 'static_call'
+        ));
+        $this->assertCount(1, $staticCalls);
 
-        $edge = $result['edges'][0];
+        $edge = $staticCalls[0];
         $this->assertEquals('App\User::getName', $edge->from());
         $this->assertEquals('App\Helper::format', $edge->to());
-        $this->assertEquals('static_call', $edge->type());
     }
 
     public function testDetectsPropertyAccess(): void
@@ -248,8 +253,6 @@ final class AstParserRefactoredTest extends TestCase
 
     public function testFunctionCallDetection(): void
     {
-        $this->parser->addVisitor(new FunctionCallVisitor());
-
         $file = $this->createTempFile('FunctionExample.php', <<<'PHP'
         <?php
         namespace App;
@@ -267,16 +270,19 @@ final class AstParserRefactoredTest extends TestCase
 
         $result = $this->parser->parse($file);
 
-        // 1 node (process)
-        $this->assertCount(1, $result['nodes']);
+        // 2 nodes: a função livre helper() e o método process().
+        // Funções livres são nós de primeira classe, não apenas símbolos.
+        $ids = array_map(fn($n) => $n->id(), $result['nodes']);
+        sort($ids);
+        $this->assertSame(['App\Service::process', 'func:App\helper'], $ids);
 
-        // 1 edge (process -> helper)
-        $edges = array_filter($result['edges'], fn($e) => $e->type() === 'function_call');
-        $this->assertCount(1, $edges);
-
-        $edge = array_values($edges)[0];
-        $this->assertEquals('App\Service::process', $edge->from());
-        $this->assertStringContainsString('helper', $edge->to());
+        // process() -> helper()
+        $calls = array_values(array_filter(
+            $result['edges'],
+            fn($e) => $e->type() === 'function_call' && $e->from() === 'App\Service::process'
+        ));
+        $this->assertCount(1, $calls);
+        $this->assertEquals('func:App\helper', $calls[0]->to());
     }
 
     public function testArrayAccessDetection(): void

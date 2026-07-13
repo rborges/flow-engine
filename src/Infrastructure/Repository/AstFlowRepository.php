@@ -80,6 +80,7 @@ final class AstFlowRepository implements FlowRepository
                     'line'   => $n->line(),
                     'lang'   => $n->language(),
                     'meta'   => $n->metadata(),
+                    'type'   => $n->type(),
                 ], $ast['nodes'] ?? []);
                 $rawEdges = array_map(fn(Edge $e) => [
                     'from'   => $e->from(),
@@ -94,7 +95,15 @@ final class AstFlowRepository implements FlowRepository
             $newMap[$file] = $entry;
 
             foreach ($entry['nodes'] as $nd) {
-                $nodes[] = new Node($nd['class'], $nd['method'], $nd['file'], $nd['line'], $nd['lang'], $nd['meta'] ?? null);
+                $nodes[] = new Node(
+                    $nd['class'],
+                    $nd['method'],
+                    $nd['file'],
+                    $nd['line'],
+                    $nd['lang'],
+                    $nd['meta'] ?? null,
+                    $nd['type'] ?? Node::TYPE_METHOD
+                );
             }
             foreach ($entry['edges'] as $ed) {
                 $edges[] = new Edge($ed['from'], $ed['to'], $ed['method'], $ed['type']);
