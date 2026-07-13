@@ -224,9 +224,12 @@ final class Container
      */
     public function analysisWarnings(): array
     {
+        $warnings = $this->flowRepository->collisionWarnings();
+
         $duplicates = $this->flowRepository->duplicateIds();
+
         if ($duplicates === []) {
-            return [];
+            return $warnings;
         }
 
         $sample = array_slice($duplicates, 0, 5);
@@ -234,12 +237,18 @@ final class Container
             ? sprintf(' and %d more', count($duplicates) - 5)
             : '';
 
-        return [sprintf(
-            'Parser produced %d duplicate node IDs; deduplicated (kept first occurrence). Examples: %s%s.',
+        // Sobra aqui apenas duplicata DENTRO do mesmo arquivo (ex.: sobrecargas de
+        // assinatura em TypeScript). Homônimos em arquivos diferentes já foram
+        // separados pelo desambiguador. Mantém-se a última ocorrência — que é o
+        // corpo real, e não a assinatura.
+        $warnings[] = sprintf(
+            'Parser produced %d duplicate node IDs within the same file; deduplicated (kept last occurrence). Examples: %s%s.',
             count($duplicates),
             implode(', ', $sample),
             $suffix
-        )];
+        );
+
+        return $warnings;
     }
 
     public function projectConfig(): ProjectConfig

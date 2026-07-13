@@ -105,7 +105,8 @@ final class FlowSnapshotSerializer implements FlowSnapshotExporterPort
                 $nodeData['line'] ?? null,
                 $language,
                 $metadata,
-                $nodeData['type'] ?? Node::TYPE_METHOD
+                $nodeData['type'] ?? Node::TYPE_METHOD,
+                $nodeData['qualifier'] ?? null
             );
 
             if (!empty($nodeData['visibility'])) {

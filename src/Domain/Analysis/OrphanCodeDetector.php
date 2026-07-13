@@ -286,11 +286,25 @@ final class OrphanCodeDetector
     }
 
     /**
+     * Identidade lógica do símbolo, para casar os padrões de supressão.
+     *
+     * Deliberadamente SEM o qualificador de arquivo: ele existe só para desambiguar
+     * homônimos e não faz parte da identidade do símbolo. As supressões casam
+     * substrings ('Command', 'Test', 'Handler'), então incluir o caminho no alvo
+     * faria qualquer nó sob um diretório com esse nome deixar de ser órfão por
+     * acidente — um falso-negativo silencioso.
+     */
+    private function patternTarget(Node $node): string
+    {
+        return $node->class() . '::' . $node->method();
+    }
+
+    /**
      * Verifica se e um entry point legitimo.
      */
     private function isLegitimateEntryPoint(Node $node): bool
     {
-        $nodeId = $node->id();
+        $nodeId = $this->patternTarget($node);
         $method = $this->extractMethodName($nodeId);
 
         // Engine-synthetic nodes (e.g. __model created by ModelPropertyVisitor) are never orphans
@@ -405,7 +419,7 @@ final class OrphanCodeDetector
      */
     private function isLegitimateUtility(Node $node): bool
     {
-        $nodeId = $node->id();
+        $nodeId = $this->patternTarget($node);
         $method = $this->extractMethodName($nodeId);
 
         foreach (self::LEGITIMATE_UTILITY_PATTERNS as $pattern) {
@@ -449,7 +463,7 @@ final class OrphanCodeDetector
      */
     private function calculateConfidence(Node $node, NodeMetrics $metrics): float
     {
-        $nodeId = $node->id();
+        $nodeId = $this->patternTarget($node);
         $method = $this->extractMethodName($nodeId);
 
         // Framework methods: confianca zero (nao e orfao)

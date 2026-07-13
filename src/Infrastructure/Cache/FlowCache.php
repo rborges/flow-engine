@@ -11,7 +11,7 @@ final class FlowCache
     // v4.44.0: nós de arquivo/função e arestas a partir de código procedural.
     // O hash não cobre o código do analisador, então mudanças de formato de nó
     // exigem bump manual — sem isso um grafo antigo é servido em silêncio.
-    private const SCHEMA_VERSION = 'v4.46.0';
+    private const SCHEMA_VERSION = 'v4.47.0';
 
     private string $cacheDir;
     private string $flowFile;
@@ -89,9 +89,15 @@ final class FlowCache
     /**
      * @param string[] $files
      * @param string[] $duplicateIds
+     * @param string[] $analysisWarnings
      */
-    public function saveFlow(Flow $flow, array $files, string $configPath, array $duplicateIds = []): void
-    {
+    public function saveFlow(
+        Flow $flow,
+        array $files,
+        string $configPath,
+        array $duplicateIds = [],
+        array $analysisWarnings = []
+    ): void {
         if (!is_dir($this->cacheDir)) {
             mkdir($this->cacheDir, 0777, true);
         }
@@ -120,9 +126,27 @@ final class FlowCache
                 'nodeCount' => $data['stats']['nodeCount'] ?? 0,
                 'edgeCount' => $data['stats']['edgeCount'] ?? 0,
                 'duplicateIds' => array_values($duplicateIds),
+                'analysisWarnings' => array_values($analysisWarnings),
                 'fileFingerprints' => $fingerprints,
             ], JSON_PRETTY_PRINT)
         );
+    }
+
+    /**
+     * Warnings produzidos durante a análise (colisões de ID, chamadas ambíguas).
+     *
+     * @return string[]
+     */
+    public function loadAnalysisWarnings(): array
+    {
+        $meta = $this->readMeta();
+        $warnings = $meta['analysisWarnings'] ?? [];
+
+        if (!is_array($warnings)) {
+            return [];
+        }
+
+        return array_values(array_filter($warnings, 'is_string'));
     }
 
     /**

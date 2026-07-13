@@ -33,6 +33,7 @@ final readonly class NodeDTO
         public ?int $endLine = null,
         public ?string $snippet = null,
         public string $type = 'method',
+        public ?string $qualifier = null,
     ) {
     }
 
@@ -62,6 +63,7 @@ final readonly class NodeDTO
             endLine: $endLine,
             snippet: null,
             type: $node->type(),
+            qualifier: $node->qualifier(),
         );
     }
 
@@ -83,6 +85,7 @@ final readonly class NodeDTO
             endLine: $this->endLine,
             snippet: $snippet,
             type: $this->type,
+            qualifier: $this->qualifier,
         );
     }
 
@@ -112,6 +115,11 @@ final readonly class NodeDTO
         // Omitido para 'method' — mantém a saída dos nós de classe idêntica à anterior.
         if ($this->type !== 'method') {
             $arr['type'] = $this->type;
+        }
+
+        // Presente só quando o nome do símbolo colide entre arquivos.
+        if ($this->qualifier !== null) {
+            $arr['qualifier'] = $this->qualifier;
         }
 
         if ($this->metadata !== null) {

@@ -15,6 +15,7 @@ use FlowEngine\Infrastructure\Analyzer\ProjectScanner;
 use FlowEngine\Infrastructure\Analyzer\FileParser;
 use FlowEngine\Infrastructure\Analyzer\FlowBuilder;
 use FlowEngine\Infrastructure\Analyzer\CrossLanguageEdgeDetector;
+use FlowEngine\Infrastructure\Analyzer\NodeIdDisambiguator;
 use FlowEngine\Infrastructure\Analyzer\ProjectRelativePath;
 use FlowEngine\Infrastructure\Cache\FlowCache;
 use FlowEngine\Infrastructure\Cache\PerFileCache;
@@ -26,6 +27,9 @@ final class AstFlowRepository implements FlowRepository
 
     /** @var string[] */
     private array $duplicateIds = [];
+
+    /** @var string[] Colisões de ID e chamadas ambíguas encontradas na análise. */
+    private array $collisionWarnings = [];
 
     public function __construct(
         private ProjectScanner $scanner,
@@ -57,13 +61,18 @@ final class AstFlowRepository implements FlowRepository
             $this->flow = $this->cache->loadFlow();
             $this->cacheHash = $this->cache->computeHash($files, $configPath);
             $this->duplicateIds = $this->cache->loadDuplicateIds();
+            $this->collisionWarnings = $this->cache->loadAnalysisWarnings();
             return;
         }
 
+        // Ordem estável: sem isso, qual declaração homônima sobrevive depende da ordem
+        // de iteração do sistema de arquivos, e o grafo varia entre máquinas.
+        sort($files);
+
         $cached = $this->perFileCache?->load() ?? [];
         $newMap  = [];
-        $nodes   = [];
-        $edges   = [];
+        $nodesByFile = [];
+        $edgesByFile = [];
         $symbols = [];
         $parserSignature = $this->parserSignature();
 
@@ -95,8 +104,11 @@ final class AstFlowRepository implements FlowRepository
 
             $newMap[$file] = $entry;
 
+            $nodesByFile[$file] = [];
+            $edgesByFile[$file] = [];
+
             foreach ($entry['nodes'] as $nd) {
-                $nodes[] = new Node(
+                $nodesByFile[$file][] = new Node(
                     $nd['class'],
                     $nd['method'],
                     $nd['file'],
@@ -107,7 +119,7 @@ final class AstFlowRepository implements FlowRepository
                 );
             }
             foreach ($entry['edges'] as $ed) {
-                $edges[] = new Edge($ed['from'], $ed['to'], $ed['method'], $ed['type']);
+                $edgesByFile[$file][] = new Edge($ed['from'], $ed['to'], $ed['method'], $ed['type']);
             }
             foreach ($entry['symbols'] ?? [] as $sd) {
                 $symbols[] = new SymbolDTO(
@@ -123,6 +135,18 @@ final class AstFlowRepository implements FlowRepository
 
         $this->perFileCache?->save($newMap);
 
+        // Símbolos globais homônimos em arquivos diferentes precisam ser separados
+        // ANTES do build; senão o FlowBuilder funde os dois num nó só.
+        $disambiguated = (new NodeIdDisambiguator())->apply(
+            $nodesByFile,
+            $edgesByFile,
+            $this->context->rootPath()
+        );
+
+        $nodes = $disambiguated['nodes'];
+        $edges = $disambiguated['edges'];
+        $this->collisionWarnings = $disambiguated['warnings'];
+
         $nodes = $this->materializeIncludedFiles($nodes, $edges, $files);
 
         if ($this->crossLanguageDetector !== null) {
@@ -134,9 +158,26 @@ final class AstFlowRepository implements FlowRepository
         $this->duplicateIds = $this->builder->lastDuplicateIds();
 
         if ($this->cache) {
-            $this->cache->saveFlow($this->flow, $files, $configPath, $this->duplicateIds);
+            $this->cache->saveFlow(
+                $this->flow,
+                $files,
+                $configPath,
+                $this->duplicateIds,
+                $this->collisionWarnings
+            );
             $this->cacheHash = $this->cache->computeHash($files, $configPath);
         }
+    }
+
+    /**
+     * Warnings estruturais da análise: símbolos homônimos e chamadas ambíguas.
+     *
+     * @api
+     * @return string[]
+     */
+    public function collisionWarnings(): array
+    {
+        return $this->collisionWarnings;
     }
 
     /**
