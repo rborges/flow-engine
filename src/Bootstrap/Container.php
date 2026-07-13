@@ -224,7 +224,7 @@ final class Container
      */
     public function analysisWarnings(): array
     {
-        $warnings = $this->flowRepository->collisionWarnings();
+        $warnings = $this->flowRepository->analysisWarnings();
 
         $duplicates = $this->flowRepository->duplicateIds();
 

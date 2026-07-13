@@ -3,8 +3,33 @@
 
 require __DIR__ . '/../vendor/autoload.php';
 
+// Sem isto, um projeto grande demais para o memory_limit morre com um fatal error
+// cru do PHP, apontando para dentro do php-parser — sem dizer o que aconteceu nem
+// o que fazer. Vale para o CLI e para o servidor MCP.
+register_shutdown_function(static function (): void {
+    $error = error_get_last();
+
+    if ($error === null || $error['type'] !== E_ERROR) {
+        return;
+    }
+
+    if (!str_contains($error['message'], 'Allowed memory size')) {
+        return;
+    }
+
+    fwrite(STDERR, sprintf(
+        "\nFlow Engine ran out of memory (memory_limit = %s).\n\n"
+        . "The project is larger than the current limit allows. Either:\n"
+        . "  - raise the limit:  php -d memory_limit=1G bin/engine.php <command> ...\n"
+        . "  - or shrink the graph by excluding third-party and build directories in\n"
+        . "    flow-engine.json (run `init` to detect them automatically).\n",
+        ini_get('memory_limit')
+    ));
+});
+
 use FlowEngine\Application\CLI\CommandRouter;
 use FlowEngine\Console\ConsoleIO;
+use FlowEngine\Infrastructure\Config\BundledLibraryDetector;
 use FlowEngine\AI\LLM\LLMException;
 
 // Commands
@@ -66,9 +91,10 @@ $router->register(new NodesCommand($io));
 $router->register(new InputsCommand($io));
 $router->register(new CompareCommand($io));
 $router->register(new WatchCommand($io));
-$router->register(new InitCommand($io));
+$libraryScanner = new BundledLibraryDetector();
+$router->register(new InitCommand($io, $libraryScanner));
 $router->register(new DoctorCommand($io));
-$router->register(new InteractiveCommand($io));
+$router->register(new InteractiveCommand($io, $libraryScanner));
 $router->register(new ComplexityCommand($io));
 $router->register(new CyclesCommand($io));
 $router->register(new ArchitectureCommand($io));

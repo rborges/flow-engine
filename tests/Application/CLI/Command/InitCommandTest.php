@@ -4,6 +4,7 @@ namespace Tests\Application\CLI\Command;
 
 use FlowEngine\Application\CLI\Command\InitCommand;
 use FlowEngine\Console\ConsoleIO;
+use FlowEngine\Infrastructure\Config\BundledLibraryDetector;
 use PHPUnit\Framework\TestCase;
 
 final class InitCommandTest extends TestCase
@@ -34,7 +35,7 @@ final class InitCommandTest extends TestCase
                     && str_ends_with((string) ($payload['path'] ?? ''), 'flow-engine.json');
             }));
 
-        $command = new InitCommand($io);
+        $command = new InitCommand($io, new BundledLibraryDetector());
         $command->handle(['bin/engine.php', 'init', $this->tempDir]);
 
         $decoded = json_decode((string) file_get_contents($this->tempDir . '/flow-engine.json'), true);

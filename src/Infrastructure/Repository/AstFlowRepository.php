@@ -16,6 +16,7 @@ use FlowEngine\Infrastructure\Analyzer\FileParser;
 use FlowEngine\Infrastructure\Analyzer\FlowBuilder;
 use FlowEngine\Infrastructure\Analyzer\CrossLanguageEdgeDetector;
 use FlowEngine\Infrastructure\Analyzer\NodeIdDisambiguator;
+use FlowEngine\Infrastructure\Analyzer\SourceFileGuard;
 use FlowEngine\Infrastructure\Analyzer\ProjectRelativePath;
 use FlowEngine\Infrastructure\Cache\FlowCache;
 use FlowEngine\Infrastructure\Cache\PerFileCache;
@@ -28,8 +29,8 @@ final class AstFlowRepository implements FlowRepository
     /** @var string[] */
     private array $duplicateIds = [];
 
-    /** @var string[] Colisões de ID e chamadas ambíguas encontradas na análise. */
-    private array $collisionWarnings = [];
+    /** @var string[] Avisos estruturais: arquivos ignorados, colisões de ID, chamadas ambíguas. */
+    private array $analysisWarnings = [];
 
     public function __construct(
         private ProjectScanner $scanner,
@@ -61,7 +62,7 @@ final class AstFlowRepository implements FlowRepository
             $this->flow = $this->cache->loadFlow();
             $this->cacheHash = $this->cache->computeHash($files, $configPath);
             $this->duplicateIds = $this->cache->loadDuplicateIds();
-            $this->collisionWarnings = $this->cache->loadAnalysisWarnings();
+            $this->analysisWarnings = $this->cache->loadAnalysisWarnings();
             return;
         }
 
@@ -75,8 +76,20 @@ final class AstFlowRepository implements FlowRepository
         $edgesByFile = [];
         $symbols = [];
         $parserSignature = $this->parserSignature();
+        $guard = new SourceFileGuard();
+        $skipped = [];
 
         foreach ($files as $file) {
+            // Bundles minificados não têm valor analítico e estouram a memória do
+            // parser. Melhor pular e dizer que pulou do que morrer com fatal error.
+            $skipReason = $guard->skipReason($file);
+
+            if ($skipReason !== null) {
+                $skipped[] = ProjectRelativePath::for($file, $this->context->rootPath())
+                    . ' (' . $skipReason . ')';
+                continue;
+            }
+
             $fp = PerFileCache::fingerprint($file) . '|parser:' . $parserSignature;
 
             if (isset($cached[$file]) && $cached[$file]['fp'] === $fp) {
@@ -145,7 +158,10 @@ final class AstFlowRepository implements FlowRepository
 
         $nodes = $disambiguated['nodes'];
         $edges = $disambiguated['edges'];
-        $this->collisionWarnings = $disambiguated['warnings'];
+        $this->analysisWarnings = array_merge(
+            $this->skippedFilesWarning($skipped),
+            $disambiguated['warnings']
+        );
 
         $nodes = $this->materializeIncludedFiles($nodes, $edges, $files);
 
@@ -163,21 +179,42 @@ final class AstFlowRepository implements FlowRepository
                 $files,
                 $configPath,
                 $this->duplicateIds,
-                $this->collisionWarnings
+                $this->analysisWarnings
             );
             $this->cacheHash = $this->cache->computeHash($files, $configPath);
         }
     }
 
     /**
-     * Warnings estruturais da análise: símbolos homônimos e chamadas ambíguas.
+     * Warnings estruturais: arquivos ignorados, símbolos homônimos, chamadas ambíguas.
      *
      * @api
      * @return string[]
      */
-    public function collisionWarnings(): array
+    public function analysisWarnings(): array
     {
-        return $this->collisionWarnings;
+        return $this->analysisWarnings;
+    }
+
+    /**
+     * @param string[] $skipped
+     * @return string[]
+     */
+    private function skippedFilesWarning(array $skipped): array
+    {
+        if ($skipped === []) {
+            return [];
+        }
+
+        $sample = array_slice($skipped, 0, 5);
+        $more = count($skipped) > 5 ? sprintf(' and %d more', count($skipped) - 5) : '';
+
+        return [sprintf(
+            '%d files were skipped as generated or minified and are absent from the graph: %s%s.',
+            count($skipped),
+            implode(', ', $sample),
+            $more
+        )];
     }
 
     /**

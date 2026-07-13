@@ -2,10 +2,13 @@
 
 namespace FlowEngine\Application\CLI\Command;
 
+use FlowEngine\Domain\Contracts\BundledLibraryScanner;
+
 final class InitCommand implements Command
 {
     public function __construct(
-        private \FlowEngine\Console\ConsoleIO $io
+        private \FlowEngine\Console\ConsoleIO $io,
+        private BundledLibraryScanner $libraryScanner
     ) {
     }
 
@@ -48,6 +51,17 @@ final class InitCommand implements Command
             $autoload = 'vendor/autoload.php';
         }
 
+        // Bibliotecas de terceiros copiadas para dentro do projeto dominam o grafo se
+        // entrarem no scan — a maior "área" do sistema vira a lib de PDF. Detectá-las
+        // aqui é o que separa uma config útil de um template em branco.
+        $detected = $this->libraryScanner->detect($projectPath);
+
+        $exclude = array_values(array_unique(array_merge(
+            ['vendor', 'tests'],
+            array_keys($detected)
+        )));
+        sort($exclude);
+
         $config = [
             'version' => '1.0',
             'context' => [
@@ -56,7 +70,7 @@ final class InitCommand implements Command
             ],
             'scan' => [
                 'include' => $include,
-                'exclude' => ['vendor', 'tests'],
+                'exclude' => $exclude,
                 'extensions' => ['php'],
             ],
         ];
@@ -67,6 +81,8 @@ final class InitCommand implements Command
             'status' => 'ok',
             'message' => 'flow-engine.json created',
             'path' => $configPath,
+            // O usuário precisa poder conferir o que ficou de fora, e por quê.
+            'excluded' => $detected,
         ]);
     }
 
