@@ -50,7 +50,10 @@ final class FreeFunctionVisitor implements NodeVisitor
             file: $context->file(),
             line: $line >= 1 ? $line : null,
             language: 'php',
-            metadata: ['endLine' => $node->getEndLine()],
+            metadata: [
+                'endLine' => $node->getEndLine(),
+                'relPath' => $context->relativeFile(),
+            ],
             type: FlowNode::TYPE_FUNCTION
         ));
 

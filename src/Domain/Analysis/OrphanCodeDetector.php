@@ -135,6 +135,13 @@ final class OrphanCodeDetector
         $orphans = [];
 
         foreach ($this->flow->nodes() as $node) {
+            // Um script é alcançável pela URL: ninguém precisa incluí-lo para que ele
+            // rode. Fan-in zero é o estado NORMAL de uma página, não indício de código
+            // morto — reportá-la como órfã convidaria a apagar o sistema inteiro.
+            if ($node->type() === Node::TYPE_FILE) {
+                continue;
+            }
+
             $metrics = $this->metricsAnalyzer->metricsFor($node->id());
 
             // Nunca chamado E não é entry point legítimo E não é utility legítimo

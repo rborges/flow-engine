@@ -11,7 +11,7 @@ final class FlowCache
     // v4.44.0: nós de arquivo/função e arestas a partir de código procedural.
     // O hash não cobre o código do analisador, então mudanças de formato de nó
     // exigem bump manual — sem isso um grafo antigo é servido em silêncio.
-    private const SCHEMA_VERSION = 'v4.45.0';
+    private const SCHEMA_VERSION = 'v4.46.0';
 
     private string $cacheDir;
     private string $flowFile;

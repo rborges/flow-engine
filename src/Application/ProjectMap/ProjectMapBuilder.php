@@ -4,6 +4,7 @@ namespace FlowEngine\Application\ProjectMap;
 
 use FlowEngine\Application\AppMap\ServiceInfo;
 use FlowEngine\Application\DTO\ProjectMapDTO;
+use FlowEngine\Domain\Analysis\ScriptEntrypointClassifier;
 use FlowEngine\Domain\Contracts\Flow as FlowContract;
 use FlowEngine\Domain\Flow\Edge;
 use FlowEngine\Domain\Flow\FlowTracer;
@@ -173,7 +174,10 @@ final class ProjectMapBuilder
     {
         $result = [];
         foreach ($flow->query()->entrypoints()->all() as $node) {
-            if (str_starts_with($node->method(), '__')) {
+            // Construtores e métodos mágicos são raízes do grafo, não entrypoints de
+            // runtime. Nós de arquivo usam o método sintético __file e são exatamente
+            // o oposto: a página que o usuário acessa.
+            if ($node->type() === Node::TYPE_METHOD && str_starts_with($node->method(), '__')) {
                 continue;
             }
 
@@ -192,6 +196,10 @@ final class ProjectMapBuilder
 
     public function classifyEntrypoint(Node $node): string
     {
+        if ($node->type() === Node::TYPE_FILE) {
+            return ScriptEntrypointClassifier::typeFor($node);
+        }
+
         $meta = $node->metadata() ?? [];
         $entrypointType = $meta['entrypoint_type'] ?? null;
 
@@ -286,6 +294,11 @@ final class ProjectMapBuilder
     {
         $class = $node->class();
 
+        // Scripts: a classe já é o caminho relativo do arquivo.
+        if ($node->type() === Node::TYPE_FILE) {
+            return $this->areaFromPath($class);
+        }
+
         if (str_contains($class, '\\')) {
             $parts = array_values(array_filter(explode('\\', $class), static fn(string $part): bool => $part !== ''));
             if (count($parts) >= 2) {
@@ -302,7 +315,26 @@ final class ProjectMapBuilder
             return $parts[0] ?? $class;
         }
 
-        return $class;
+        // Sem namespace (PHP legado) ou função global: a classe não carrega
+        // estrutura alguma, e usá-la como área produz uma área por classe. O
+        // diretório é a única organização que esse código tem.
+        $relPath = $node->metadata()['relPath'] ?? null;
+
+        if (is_string($relPath) && $relPath !== '') {
+            return $this->areaFromPath($relPath);
+        }
+
+        return $class !== '' ? $class : '(root)';
+    }
+
+    /**
+     * Área a partir de um caminho relativo: o diretório que contém o arquivo.
+     */
+    private function areaFromPath(string $relativePath): string
+    {
+        $dir = str_replace('\\', '/', dirname($relativePath));
+
+        return ($dir === '.' || $dir === '' || $dir === '/') ? '(root)' : $dir;
     }
 
     private function purposePayload(): array

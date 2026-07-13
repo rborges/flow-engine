@@ -4,6 +4,7 @@ namespace FlowEngine\Application\CLI\Command;
 
 use FlowEngine\Bootstrap\Container;
 use FlowEngine\Console\ConsoleIO;
+use FlowEngine\Domain\Analysis\ScriptEntrypointClassifier;
 use FlowEngine\Domain\Flow\Node;
 
 final class EntrypointsCommand implements Command
@@ -83,8 +84,10 @@ final class EntrypointsCommand implements Command
     {
         $result = [];
         foreach ($nodes as $node) {
-            // Constructors and magic methods are graph roots, not actionable runtime entrypoints.
-            if (str_starts_with($node->method(), '__')) {
+            // Constructors and magic methods are graph roots, not actionable runtime
+            // entrypoints. File nodes use the synthetic __file method and are the exact
+            // opposite: the page the user actually hits.
+            if ($node->type() === Node::TYPE_METHOD && str_starts_with($node->method(), '__')) {
                 continue;
             }
 
@@ -101,6 +104,10 @@ final class EntrypointsCommand implements Command
 
     private function classifyType(Node $node): string
     {
+        if ($node->type() === Node::TYPE_FILE) {
+            return ScriptEntrypointClassifier::typeFor($node);
+        }
+
         $meta = $node->metadata() ?? [];
 
         // Parsers (Python, TypeScript) set this directly in metadata

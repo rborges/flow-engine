@@ -6,6 +6,7 @@ use FlowEngine\Application\DTO\SymbolDTO;
 use FlowEngine\Domain\Flow\Edge;
 use FlowEngine\Domain\Flow\Node;
 use FlowEngine\Domain\Flow\NodeFactory;
+use FlowEngine\Infrastructure\Analyzer\ProjectRelativePath;
 
 /**
  * Contexto compartilhado entre todos os visitors.
@@ -105,6 +106,16 @@ final class VisitorContext
     public function projectRoot(): ?string
     {
         return $this->projectRoot;
+    }
+
+    /**
+     * Caminho do arquivo atual relativo à raiz do projeto.
+     *
+     * @internal
+     */
+    public function relativeFile(): string
+    {
+        return ProjectRelativePath::for($this->file, $this->projectRoot);
     }
 
     /**
