@@ -12,7 +12,7 @@ final class ConfigurableNodeVisibilityPolicyTest extends TestCase
 {
     public function test_it_stores_and_exposes_project_config(): void
     {
-        $config = $this->createMock(ProjectConfig::class);
+        $config = $this->createStub(ProjectConfig::class);
         $config->method('rootPath')->willReturn('/project');
 
         $policy = new ConfigurableNodeVisibilityPolicy($config, [
@@ -25,7 +25,7 @@ final class ConfigurableNodeVisibilityPolicyTest extends TestCase
 
     public function test_it_delegates_visibility_to_inner_policies(): void
     {
-        $config = $this->createMock(ProjectConfig::class);
+        $config = $this->createStub(ProjectConfig::class);
 
         $policy = new ConfigurableNodeVisibilityPolicy($config, [
             new DefaultNodeVisibilityPolicy(),

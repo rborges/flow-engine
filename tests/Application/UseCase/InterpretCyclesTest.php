@@ -48,7 +48,7 @@ final class InterpretCyclesTest extends TestCase
             ]
         );
 
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('send')->willReturn(new LLMResponse(
             content: 'Cycle between A and B detected.',
             tokensUsed: 200,

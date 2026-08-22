@@ -31,8 +31,13 @@ final class CatalogServiceBuilder
             $name = $entry['name'] ?? basename(rtrim($root, DIRECTORY_SEPARATOR));
 
             $container = new Container($root, $allowReadOnlyInference);
+            $stalenessReport = $container->checkStaleness()->execute();
             $container->analyzeProject()->execute();
             $files = $container->projectFiles();
+            $warnings = $container->analysisWarnings();
+            if ($stalenessReport->stale) {
+                $warnings[] = $stalenessReport->summaryWarning();
+            }
 
             $services[] = new ServiceInfo(
                 name: $name,
@@ -44,6 +49,8 @@ final class CatalogServiceBuilder
                 configuredScanLanguages: $this->languageSupportCatalog->supportedConfiguredLanguages($container->configuredScanExtensions()),
                 detectedLanguages: $this->languageSupportCatalog->detectFromFiles($files),
                 configResolution: $container->configResolution()->toArray(),
+                analysisWarnings: array_values(array_unique($warnings)),
+                staleness: $stalenessReport->stale ? $stalenessReport->toArray() : null,
             );
         }
 

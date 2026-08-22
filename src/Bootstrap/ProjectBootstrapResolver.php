@@ -635,8 +635,26 @@ final class ProjectBootstrapResolver
                 continue;
             }
 
+            if (!is_readable($base)) {
+                throw new \RuntimeException(sprintf('Configured scan root is not readable: %s', $base));
+            }
+
+            $directoryIterator = new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS);
+            $prunedIterator = new \RecursiveCallbackFilterIterator(
+                $directoryIterator,
+                function (\SplFileInfo $entry) use ($root, $ignoredPaths): bool {
+                    if (!$entry->isDir()) {
+                        return true;
+                    }
+
+                    $relative = $this->relativePath($root, $entry->getPathname());
+                    return !$this->isIgnored($relative, $ignoredPaths) && is_readable($entry->getPathname());
+                }
+            );
             $iterator = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS)
+                $prunedIterator,
+                \RecursiveIteratorIterator::LEAVES_ONLY,
+                \RecursiveIteratorIterator::CATCH_GET_CHILD
             );
 
             foreach ($iterator as $entry) {

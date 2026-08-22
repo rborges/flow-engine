@@ -60,6 +60,8 @@ final class FlowSnapshotSerializer implements FlowSnapshotExporterPort
      */
     public function toFlow(array $data): Flow
     {
+        $this->assertValidSnapshot($data);
+
         $nodes = [];
         $edges = [];
 
@@ -131,5 +133,78 @@ final class FlowSnapshotSerializer implements FlowSnapshotExporterPort
         }
 
         return new Flow($nodes, $edges, new SymbolIndex($symbols));
+    }
+
+    /** @param array<string, mixed> $data */
+    private function assertValidSnapshot(array $data): void
+    {
+        if (
+            !is_array($data['stats'] ?? null)
+            || !is_array($data['nodes'] ?? null)
+            || !is_array($data['edges'] ?? null)
+            || !is_array($data['symbols'] ?? null)
+            || !is_int($data['stats']['nodeCount'] ?? null)
+            || !is_int($data['stats']['edgeCount'] ?? null)
+            || !is_int($data['stats']['symbolCount'] ?? null)
+            || $data['stats']['nodeCount'] !== count($data['nodes'])
+            || $data['stats']['edgeCount'] !== count($data['edges'])
+            || $data['stats']['symbolCount'] !== count($data['symbols'])
+        ) {
+            throw new \RuntimeException('Invalid flow cache structure');
+        }
+
+        $nodeIds = [];
+        foreach ($data['nodes'] as $node) {
+            if (
+                !$this->hasStringFields($node, ['id', 'class', 'method', 'file', 'visibility', 'language'])
+                || !array_key_exists('line', $node)
+                || ($node['line'] !== null && !is_int($node['line']))
+                || !is_bool($node['isPublic'] ?? null)
+                || (isset($node['metadata']) && !is_array($node['metadata']))
+                || !in_array($node['visibility'], [NodeVisibility::PUBLIC, NodeVisibility::HIDDEN], true)
+                || $node['isPublic'] !== ($node['visibility'] === NodeVisibility::PUBLIC)
+                || $node['id'] !== $this->expectedNodeId($node['language'], $node['class'], $node['method'])
+                || isset($nodeIds[$node['id']])
+            ) {
+                throw new \RuntimeException('Invalid flow cache node structure');
+            }
+            $nodeIds[$node['id']] = true;
+        }
+        foreach ($data['edges'] as $edge) {
+            if (!$this->hasStringFields($edge, ['from', 'to', 'method', 'type'])) {
+                throw new \RuntimeException('Invalid flow cache edge structure');
+            }
+        }
+        foreach ($data['symbols'] as $symbol) {
+            if (
+                !$this->hasStringFields($symbol, ['id', 'name', 'kind', 'file'])
+                || !is_int($symbol['line'] ?? null)
+                || (isset($symbol['sourceModule']) && !is_string($symbol['sourceModule']))
+            ) {
+                throw new \RuntimeException('Invalid flow cache symbol structure');
+            }
+        }
+    }
+
+    /** @param string[] $fields */
+    private function hasStringFields(mixed $value, array $fields): bool
+    {
+        if (!is_array($value)) {
+            return false;
+        }
+        foreach ($fields as $field) {
+            if (!isset($value[$field]) || !is_string($value[$field])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function expectedNodeId(string $language, string $class, string $method): string
+    {
+        $base = $class . '::' . $method;
+
+        return $language === 'php' ? $base : $language . ':' . $base;
     }
 }

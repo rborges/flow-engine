@@ -19,6 +19,7 @@ final readonly class StalenessReport
         public array $newFiles,
         public array $deletedFiles,
         public int $totalChanged,
+        public bool $configChanged = false,
     ) {}
 
     /**
@@ -29,7 +30,7 @@ final readonly class StalenessReport
         $changedFiles = array_slice($this->changedFiles, 0, self::FILE_EXAMPLE_LIMIT);
         $newFiles = array_slice($this->newFiles, 0, self::FILE_EXAMPLE_LIMIT);
         $deletedFiles = array_slice($this->deletedFiles, 0, self::FILE_EXAMPLE_LIMIT);
-        $shown = count($changedFiles) + count($newFiles) + count($deletedFiles);
+        $shown = count($changedFiles) + count($newFiles) + count($deletedFiles) + ($this->configChanged ? 1 : 0);
 
         return [
             'stale' => $this->stale,
@@ -37,11 +38,13 @@ final readonly class StalenessReport
                 'changed' => count($this->changedFiles),
                 'new' => count($this->newFiles),
                 'deleted' => count($this->deletedFiles),
+                'configuration' => $this->configChanged ? 1 : 0,
             ],
             'changedFiles' => $changedFiles,
             'newFiles' => $newFiles,
             'deletedFiles' => $deletedFiles,
             'totalChanged' => $this->totalChanged,
+            'configChanged' => $this->configChanged,
             'truncated' => $shown < $this->totalChanged,
             'directories' => $this->directorySummary(),
         ];
@@ -54,12 +57,15 @@ final readonly class StalenessReport
         }
 
         $all = array_merge($this->changedFiles, $this->newFiles, $this->deletedFiles);
+        if ($this->configChanged) {
+            $all[] = 'flow-engine.json';
+        }
         $total = $this->totalChanged;
         $shown = array_slice($all, 0, 5);
         $suffix = $total > 5 ? sprintf(' (and %d more)', $total - 5) : '';
 
         return sprintf(
-            '%d file%s modified since last analyze: %s%s. Re-run analyze for accurate results.',
+            '%d project input%s changed since the previous cache: %s%s. Cache refreshed automatically before producing these results.',
             $total,
             $total === 1 ? '' : 's',
             implode(', ', array_map('basename', $shown)),

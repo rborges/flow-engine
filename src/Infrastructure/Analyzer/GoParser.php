@@ -15,12 +15,16 @@ use FlowEngine\Domain\Flow\NodeFactory;
  * - Detects intra-package calls between exported functions
  *
  * Node ID pattern:
- *   go:packageName::FuncName
- *   go:packageName.ReceiverType::MethodName
+ *   go:~path~.relative.directory::FuncName
+ *   go:~path~.relative.directory.ReceiverType::MethodName
+ * Root-level files retain the declared package name.
  */
 final class GoParser implements FileParser
 {
-    public function __construct(private readonly NodeFactory $nodeFactory)
+    public function __construct(
+        private readonly NodeFactory $nodeFactory,
+        private readonly ?string $projectRoot = null,
+    )
     {
     }
 
@@ -96,7 +100,7 @@ final class GoParser implements FileParser
             if (preg_match('/^func\s+\(\w+\s+\*?([A-Za-z0-9_]+)\)\s+([A-Z][A-Za-z0-9_]*)\s*\(/', $trim, $m)) {
                 $receiver   = $m[1];
                 $methodName = $m[2];
-                $className  = $package . '.' . $receiver;
+                $className  = $this->moduleName($file, $package) . '.' . $receiver;
                 $metadata   = $handlerMeta[$methodName] ?? null;
 
                 $node    = $this->nodeFactory->create($className, $methodName, $file, $lineNo, 'go', $metadata);
@@ -109,7 +113,7 @@ final class GoParser implements FileParser
                 $funcName = $m[1];
                 $metadata = $handlerMeta[$funcName] ?? null;
 
-                $node    = $this->nodeFactory->create($package, $funcName, $file, $lineNo, 'go', $metadata);
+                $node    = $this->nodeFactory->create($this->moduleName($file, $package), $funcName, $file, $lineNo, 'go', $metadata);
                 $nodes[] = $node;
                 $topLevel[$funcName] = $node->id();
                 continue;
@@ -136,7 +140,7 @@ final class GoParser implements FileParser
 
             // Method
             if (preg_match('/^func\s+\(\w+\s+\*?([A-Za-z0-9_]+)\)\s+([A-Z][A-Za-z0-9_]*)\s*\(/', $trim, $m)) {
-                $className     = $package . '.' . $m[1];
+                $className     = $this->moduleName($file, $package) . '.' . $m[1];
                 $tmp           = $this->nodeFactory->create($className, $m[2], $file, ($idx + 1), 'go');
                 $currentNodeId = $tmp->id();
                 $inFunc        = true;
@@ -167,5 +171,42 @@ final class GoParser implements FileParser
         }
 
         return ['nodes' => $nodes, 'edges' => $edges];
+    }
+
+    private function moduleName(string $file, string $declaredPackage): string
+    {
+        if ($this->projectRoot === null) {
+            return $declaredPackage;
+        }
+
+        $root = str_replace('\\', '/', rtrim(realpath($this->projectRoot) ?: $this->projectRoot, '/\\'));
+        $path = str_replace('\\', '/', realpath($file) ?: $file);
+
+        if (!str_starts_with($path, $root . '/')) {
+            return $declaredPackage;
+        }
+
+        $relativeDirectory = dirname(substr($path, strlen($root) + 1));
+        if ($relativeDirectory === '.' || $relativeDirectory === '') {
+            return $declaredPackage;
+        }
+
+        $segments = array_values(array_filter(explode('/', $relativeDirectory), static fn(string $segment): bool => $segment !== ''));
+        $segments = array_map(self::encodeIdentifier(...), $segments);
+        $module = '~path~.' . implode('.', $segments);
+        $directoryPackage = basename($relativeDirectory);
+
+        return $declaredPackage === $directoryPackage
+            ? $module
+            : $module . '@' . self::encodeIdentifier($declaredPackage);
+    }
+
+    private static function encodeIdentifier(string $value): string
+    {
+        return preg_replace_callback(
+            '/[^A-Za-z0-9]/',
+            static fn(array $match): string => sprintf('_%02X', ord($match[0])),
+            $value
+        ) ?: '_';
     }
 }

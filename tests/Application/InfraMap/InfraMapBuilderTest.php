@@ -4,6 +4,8 @@ namespace Tests\Application\InfraMap;
 
 use FlowEngine\Application\InfraMap\InfraMapBuilder;
 use FlowEngine\Infrastructure\Config\FlowServiceCatalogLoader;
+use FlowEngine\Infrastructure\Config\SchemaValidator;
+use FlowEngine\Infrastructure\Config\SourceConfigurationInspector;
 use FlowEngine\Infrastructure\Docker\DockerTopologyAnalyzer;
 use FlowEngine\Infrastructure\Infra\CaddyTopologyAnalyzer;
 use FlowEngine\Infrastructure\Infra\FileInventoryAnalyzer;
@@ -45,7 +47,7 @@ CADDY);
             ],
         ], JSON_PRETTY_PRINT));
 
-        $result = (new InfraMapBuilder(new FileInventoryAnalyzer(), new DockerTopologyAnalyzer(), new CaddyTopologyAnalyzer(), new WebCrawlRulesAnalyzer(), new ScriptTopologyAnalyzer(), new FlowServiceCatalogLoader()))->buildForCatalog($catalog, 'summary', ['proxy']);
+        $result = $this->builder()->buildForCatalog($catalog, 'summary', ['proxy']);
 
         $this->assertSame('infra_map', $result['kind']);
         $this->assertSame('catalog', $result['scope']);
@@ -70,7 +72,7 @@ services:
       - ./workspace:/workspace:ro
 YAML);
 
-        $result = (new InfraMapBuilder(new FileInventoryAnalyzer(), new DockerTopologyAnalyzer(), new CaddyTopologyAnalyzer(), new WebCrawlRulesAnalyzer(), new ScriptTopologyAnalyzer(), new FlowServiceCatalogLoader()))->buildForProject($base, 'full', ['docker']);
+        $result = $this->builder()->buildForProject($base, 'full', ['docker']);
 
         $this->assertContains(
             [
@@ -91,6 +93,21 @@ YAML);
                 'source' => $base . DIRECTORY_SEPARATOR . 'docker-compose.yml',
             ],
             $result['edges']
+        );
+    }
+
+    private function builder(): InfraMapBuilder
+    {
+        return new InfraMapBuilder(
+            new FileInventoryAnalyzer(),
+            new DockerTopologyAnalyzer(),
+            new CaddyTopologyAnalyzer(),
+            new WebCrawlRulesAnalyzer(),
+            new ScriptTopologyAnalyzer(),
+            new FlowServiceCatalogLoader(),
+            new SourceConfigurationInspector(new SchemaValidator(
+                __DIR__ . '/../../../schema/flow-engine.v1.json',
+            )),
         );
     }
 

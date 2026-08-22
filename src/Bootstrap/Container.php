@@ -45,6 +45,7 @@ use FlowEngine\Infrastructure\Cache\FlowCache;
 use FlowEngine\Infrastructure\Cache\FlowSnapshotSerializer;
 use FlowEngine\Infrastructure\Cache\PerFileCache;
 use FlowEngine\Infrastructure\Cache\ReportCache;
+use FlowEngine\Infrastructure\Cache\AnalysisSignature;
 use FlowEngine\Infrastructure\Context\DefaultProjectContextFactory;
 use FlowEngine\Infrastructure\Context\DefaultFrameworkDetector;
 use FlowEngine\Infrastructure\Repository\AstFlowRepository;
@@ -116,6 +117,7 @@ final class Container
     private ProjectContext $context;
     private ConfigResolution $configResolution;
     private AstFlowRepository $flowRepository;
+    private string $analysisContext;
     private ?FlowCache $flowCache = null;
     private ?ReportCache $reportCache = null;
     private ?SnapshotStorePort $snapshotStore = null;
@@ -147,6 +149,7 @@ final class Container
         /* 3. Framework detection */
         $frameworkDetector = new DefaultFrameworkDetector();
         $framework = $frameworkDetector->detect($this->context);
+        $this->analysisContext = $framework->value();
 
         /* 4. Visibility policy (governança) */
         $this->visibilityPolicy = new ConfigurableNodeVisibilityPolicy(
@@ -183,7 +186,8 @@ final class Container
             $this->context,
             $useCache ? $this->flowCache() : null,
             new CrossLanguageEdgeDetector(),
-            $useCache ? new PerFileCache($this->context) : null
+            $useCache ? new PerFileCache($this->context) : null,
+            $this->analysisContext,
         );
     }
 
@@ -211,9 +215,29 @@ final class Container
         return $this->reportCache ??= new ReportCache($this->context);
     }
 
+    /** @return string[] */
+    public function effectiveIgnoredPaths(): array
+    {
+        return FilesystemProjectScanner::effectiveIgnoredPaths($this->context->ignoredPaths());
+    }
+
     public function cacheHash(): ?string
     {
         return $this->flowRepository->cacheHash();
+    }
+
+    public function areFlowCacheInputsCurrent(): bool
+    {
+        $cache = $this->flowCache();
+        $files = $this->projectFiles();
+        $fingerprints = $cache->captureFileFingerprints($files);
+        $configPath = $this->context->rootPath() . DIRECTORY_SEPARATOR . 'flow-engine.json';
+
+        return $cache->inputsMatch(
+            $fingerprints,
+            $configPath,
+            AnalysisSignature::compute($this->analysisContext),
+        );
     }
 
     /**
@@ -224,9 +248,13 @@ final class Container
      */
     public function analysisWarnings(): array
     {
+        $warnings = array_merge(
+            $this->flowRepository->scanWarnings(),
+            $this->flowRepository->cacheWarnings(),
+        );
         $duplicates = $this->flowRepository->duplicateIds();
         if ($duplicates === []) {
-            return [];
+            return $warnings;
         }
 
         $sample = array_slice($duplicates, 0, 5);
@@ -234,12 +262,14 @@ final class Container
             ? sprintf(' and %d more', count($duplicates) - 5)
             : '';
 
-        return [sprintf(
-            'Parser produced %d duplicate node IDs; deduplicated (kept first occurrence). Examples: %s%s.',
+        $warnings[] = sprintf(
+            'Parser produced %d duplicate node IDs; deduplicated (kept last occurrence). Examples: %s%s.',
             count($duplicates),
             implode(', ', $sample),
             $suffix
-        )];
+        );
+
+        return $warnings;
     }
 
     public function projectConfig(): ProjectConfig

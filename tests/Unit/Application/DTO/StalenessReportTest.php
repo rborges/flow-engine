@@ -31,9 +31,9 @@ class StalenessReportTest extends TestCase
 
         $warning = $report->summaryWarning();
 
-        $this->assertStringContainsString('1 file modified since last analyze', $warning);
+        $this->assertStringContainsString('1 project input changed since the previous cache', $warning);
         $this->assertStringContainsString('Foo.php', $warning);
-        $this->assertStringContainsString('Re-run analyze for accurate results.', $warning);
+        $this->assertStringContainsString('Cache refreshed automatically before producing these results.', $warning);
         $this->assertStringNotContainsString('and', $warning);
     }
 
@@ -43,7 +43,7 @@ class StalenessReportTest extends TestCase
 
         $warning = $report->summaryWarning();
 
-        $this->assertStringStartsWith('3 files modified', $warning);
+        $this->assertStringStartsWith('3 project inputs changed', $warning);
         $this->assertStringContainsString('B.php', $warning);
         $this->assertStringContainsString('C.php', $warning);
         $this->assertStringContainsString('D.php', $warning);
@@ -63,7 +63,7 @@ class StalenessReportTest extends TestCase
 
         $warning = $report->summaryWarning();
 
-        $this->assertStringStartsWith('7 files modified', $warning);
+        $this->assertStringStartsWith('7 project inputs changed', $warning);
         $this->assertStringContainsString('(and 2 more)', $warning);
         // Only first 5 basenames should appear explicitly
         $this->assertStringContainsString('A.php', $warning);
@@ -94,7 +94,8 @@ class StalenessReportTest extends TestCase
         $this->assertSame([], $arr['newFiles']);
         $this->assertSame(['/a/Bar.php'], $arr['deletedFiles']);
         $this->assertSame(2, $arr['totalChanged']);
-        $this->assertSame(['changed' => 1, 'new' => 0, 'deleted' => 1], $arr['counts']);
+        $this->assertSame(['changed' => 1, 'new' => 0, 'deleted' => 1, 'configuration' => 0], $arr['counts']);
+        $this->assertFalse($arr['configChanged']);
         $this->assertFalse($arr['truncated']);
         $this->assertSame([['directory' => '/a', 'count' => 2]], $arr['directories']);
     }
@@ -136,5 +137,17 @@ class StalenessReportTest extends TestCase
 
         $this->assertStringContainsString('MyFile.php', $warning);
         $this->assertStringNotContainsString('/very/long/path/to/', $warning);
+    }
+
+    public function testConfigurationChangeIsVisibleWithoutSourceFiles(): void
+    {
+        $report = new StalenessReport(true, [], [], [], 1, true);
+
+        $array = $report->toArray();
+
+        $this->assertTrue($array['configChanged']);
+        $this->assertSame(1, $array['counts']['configuration']);
+        $this->assertFalse($array['truncated']);
+        $this->assertStringContainsString('flow-engine.json', $report->summaryWarning());
     }
 }

@@ -45,7 +45,7 @@ final class GoParserTest extends TestCase
 
     private function makeParser(): GoParser
     {
-        return new GoParser(new DefaultNodeFactory());
+        return new GoParser(new DefaultNodeFactory(), $this->tempDir);
     }
 
     // -------------------------------------------------------------------------
@@ -98,6 +98,84 @@ GO);
 
         $ids = array_map(fn($n) => $n->id(), $result['nodes']);
         self::assertContains('go:api::HandleRequest', $ids);
+    }
+
+    public function test_nested_directories_disambiguate_equal_package_and_function_names(): void
+    {
+        $firstDir = $this->tempDir . '/services/automerge';
+        $secondDir = $this->tempDir . '/services/shared/automerge';
+        mkdir($firstDir, 0777, true);
+        mkdir($secondDir, 0777, true);
+        $source = "package automerge\n\nfunc TestMain() {}\n";
+        file_put_contents($firstDir . '/main_test.go', $source);
+        file_put_contents($secondDir . '/main_test.go', $source);
+
+        $parser = $this->makeParser();
+        $firstIds = array_map(static fn($node): string => $node->id(), $parser->parse($firstDir . '/main_test.go')['nodes']);
+        $secondIds = array_map(static fn($node): string => $node->id(), $parser->parse($secondDir . '/main_test.go')['nodes']);
+
+        self::assertContains('go:~path~.services.automerge::TestMain', $firstIds);
+        self::assertContains('go:~path~.services.shared.automerge::TestMain', $secondIds);
+        self::assertNotSame($firstIds, $secondIds);
+    }
+
+    public function test_directory_encoding_is_collision_free(): void
+    {
+        $hyphenDirectory = $this->tempDir . '/foo-bar';
+        $underscoreDirectory = $this->tempDir . '/foo_bar';
+        mkdir($hyphenDirectory, 0777, true);
+        mkdir($underscoreDirectory, 0777, true);
+        file_put_contents($hyphenDirectory . '/main.go', "package first\n\nfunc Run() {}\n");
+        file_put_contents($underscoreDirectory . '/main.go', "package second\n\nfunc Run() {}\n");
+
+        $parser = $this->makeParser();
+        $hyphenId = $parser->parse($hyphenDirectory . '/main.go')['nodes'][0]->id();
+        $underscoreId = $parser->parse($underscoreDirectory . '/main.go')['nodes'][0]->id();
+
+        self::assertSame('go:~path~.foo_2Dbar@first::Run', $hyphenId);
+        self::assertSame('go:~path~.foo_5Fbar@second::Run', $underscoreId);
+        self::assertNotSame($hyphenId, $underscoreId);
+    }
+
+    public function test_external_test_package_in_same_directory_has_distinct_id(): void
+    {
+        $directory = $this->tempDir . '/pkg/auth';
+        mkdir($directory, 0777, true);
+        file_put_contents($directory . '/auth.go', "package auth\n\nfunc New() {}\n");
+        file_put_contents($directory . '/auth_test.go', "package auth_test\n\nfunc New() {}\n");
+
+        $parser = $this->makeParser();
+        $productionId = $parser->parse($directory . '/auth.go')['nodes'][0]->id();
+        $externalTestId = $parser->parse($directory . '/auth_test.go')['nodes'][0]->id();
+
+        self::assertSame('go:~path~.pkg.auth::New', $productionId);
+        self::assertSame('go:~path~.pkg.auth@auth_5Ftest::New', $externalTestId);
+        self::assertNotSame($productionId, $externalTestId);
+    }
+
+    public function test_root_package_and_same_named_directory_have_distinct_ids(): void
+    {
+        $rootFile = $this->tempDir . '/root.go';
+        $nestedDirectory = $this->tempDir . '/cmd';
+        mkdir($nestedDirectory, 0777, true);
+        file_put_contents($rootFile, "package cmd\n\nfunc Run() {}\n");
+        file_put_contents($nestedDirectory . '/file.go', "package cmd\n\nfunc Run() {}\n");
+
+        $parser = $this->makeParser();
+        $rootId = $parser->parse($rootFile)['nodes'][0]->id();
+        $nestedId = $parser->parse($nestedDirectory . '/file.go')['nodes'][0]->id();
+
+        self::assertSame('go:cmd::Run', $rootId);
+        self::assertSame('go:~path~.cmd::Run', $nestedId);
+        self::assertNotSame($rootId, $nestedId);
+    }
+
+    public function test_constructor_remains_compatible_without_project_root(): void
+    {
+        $file = $this->createTempFile('compat.go', "package compat\n\nfunc Run() {}\n");
+        $parser = new GoParser(new DefaultNodeFactory());
+
+        self::assertSame('go:compat::Run', $parser->parse($file)['nodes'][0]->id());
     }
 
     public function test_stores_http_handler_metadata(): void

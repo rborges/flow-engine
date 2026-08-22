@@ -22,7 +22,8 @@
         }
     },
     "scripts": {
-        "test": "vendor/bin/phpunit",
+        "test": "vendor/bin/phpunit --fail-on-phpunit-notice --fail-on-notice",
+        "gate:baseline": "php bin/engine.php snapshot . --save=baseline-main",
         "gate:pr": "php bin/quality-gate.php --mode=pr --baseline=baseline-main",
         "gate:main": "php bin/quality-gate.php --mode=main"
     },

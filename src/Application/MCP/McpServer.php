@@ -4,6 +4,7 @@ namespace FlowEngine\Application\MCP;
 
 use FlowEngine\AI\Export\ExportOptions;
 use FlowEngine\Application\AppMap\ApplicationMapBuilder;
+use FlowEngine\Application\DTO\StalenessReport;
 use FlowEngine\Application\InfraMap\InfraMapBuilder;
 use FlowEngine\Application\ProjectMap\ProjectFindBuilder;
 use FlowEngine\Application\ProjectMap\ProjectLookupBuilder;
@@ -25,7 +26,7 @@ final class McpServer
     private const NODE_ID_DESCRIPTION =
         'Node identifier as returned by flow_map or flow_find. PHP uses `Namespace\\Class::method` (no prefix); '
         . 'every other code language prefixes the id, in the form `<lang>:<module.path>[.<Class>]::<member>` '
-        . '(e.g. `typescript:user.service.UserService::getUser`, `python:App.src.sample::a`, `go:main::Hello`, '
+        . '(e.g. `typescript:user%2Eservice.UserService::getUser`, `python:App.src.sample::a`, `go:main::Hello`, '
         . '`dart:lib.presentation.bloc.library_bloc::module`). Blade templates appear only as edge sources (`blade:...`), '
         . 'not as standalone nodes — do not pass them here. Use flow_find first if you do not know the exact ID.';
 
@@ -133,7 +134,7 @@ final class McpServer
                 'name'    => self::SERVER_NAME,
                 'version' => self::SERVER_VERSION,
             ],
-            'instructions' => 'Flow Engine indexes structure across PHP, Python, TypeScript/JavaScript, Go, Dart, and Blade — its own implementation language (PHP) is incidental and does not constrain target projects. Node IDs use one of two shapes: PHP emits `Namespace\\Class::method` with no prefix; every other code language prefixes the id with `<lang>:<module.path>[.<Class>]::<member>`. Examples (taken from real analyzers): `typescript:user.service.UserService::getUser`, `typescript:helpers::formatDate`, `python:App.src.sample::a`, `python:App.src.sample.C::m`, `go:main::Hello`, `go:users.UserService::GetUser`, `dart:lib.presentation.bloc.library_bloc::module`. Blade templates appear only as edge sources (`blade:livewire.backup.b2-manager` style) — they have no standalone nodes, so node-only tools (`flow_impact`, `flow_risk`, `flow_refactor_plan`) reject `blade:` ids. Always call `flow_map` first to see the exact IDs in the analyzed project; never invent identifiers.',
+            'instructions' => 'Flow Engine indexes structure across PHP, Python, TypeScript/JavaScript, Go, Dart, and Blade — its own implementation language (PHP) is incidental and does not constrain target projects. Node IDs use one of two shapes: PHP emits `Namespace\\Class::method` with no prefix; every other code language prefixes the id with `<lang>:<module.path>[.<Class>]::<member>`. Examples (taken from real analyzers): `typescript:user%2Eservice.UserService::getUser`, `typescript:helpers::formatDate`, `python:App.src.sample::a`, `python:App.src.sample.C::m`, `go:main::Hello`, `go:~path~.users.UserService::GetUser`, `dart:lib.presentation.bloc.library_bloc::module`. Blade templates appear only as edge sources (`blade:livewire.backup.b2-manager` style) — they have no standalone nodes, so node-only tools (`flow_impact`, `flow_risk`, `flow_refactor_plan`) reject `blade:` ids. Always call `flow_map` first to see the exact IDs in the analyzed project; never invent identifiers.',
         ]);
     }
 
@@ -252,22 +253,11 @@ final class McpServer
 
                     $projectPath = $this->normalizeProjectPath((string) ($args['project'] ?? ''));
                     $this->assertProjectPathExists($projectPath);
-                    $container = new Container($projectPath, true);
-                    $stalenessReport = $container->checkStaleness()->execute();
-                    $container->analyzeProject()->execute();
+                    [$container, $stalenessReport] = $this->prepareProject($projectPath);
                     $capabilities = $this->singleProjectCapabilities($languageSupportCatalog, $container);
 
-                    $extraWarnings = array_merge($extraWarnings, $container->analysisWarnings());
-
                     $payload = $builder->buildForProject($projectPath, $container->getFlow(), $capabilities, $mode, $depth, $extraWarnings)->toArray();
-
-                    if ($stalenessReport->stale) {
-                        $payload['staleness'] = $stalenessReport->toArray();
-                        $payload['warnings'] = array_merge(
-                            is_array($payload['warnings'] ?? null) ? $payload['warnings'] : [],
-                            [$stalenessReport->summaryWarning()]
-                        );
-                    }
+                    $payload = $this->attachProjectWarnings($payload, $container, $stalenessReport);
 
                     return $this->encodeJson(
                         $this->attachProjectMetadata($payload, $container->configResolution()),
@@ -339,7 +329,7 @@ SINGLE TARGET (default, backward-compatible):
 BATCH (multiple targets):
   Pass `targets` as a JSON array of FQN strings to inspect several items in one call.
   Examples (PHP):  "targets": ["App\\Http\\Controllers\\UserController::index", "App\\Services\\UserService::create"]
-  Examples (TS):   "targets": ["typescript:user.service.UserService::getUser", "typescript:helpers::formatDate"]
+  Examples (TS):   "targets": ["typescript:user%2Eservice.UserService::getUser", "typescript:helpers::formatDate"]
   Examples (Python): "targets": ["python:App.src.sample::a", "python:App.src.sample.C::m"]
   - Results are returned in input order; duplicates are deduplicated before processing.
   - Not-found items are collected in `notFound[]` and do NOT abort the other results.
@@ -486,9 +476,7 @@ DESC . ' ' . $supportSummary,
 
                         $projectPath = $this->normalizeProjectPath((string) ($args['project'] ?? ''));
                         $this->assertProjectPathExists($projectPath);
-                        $container = new Container($projectPath, true);
-                        $stalenessReport = $container->checkStaleness()->execute();
-                        $container->analyzeProject()->execute();
+                        [$container, $stalenessReport] = $this->prepareProject($projectPath);
                         $flow = $container->getFlow();
 
                         // Expand "all" for project
@@ -514,14 +502,7 @@ DESC . ' ' . $supportSummary,
 
                         $payload = $batchResult->toArray();
                         $payload['warnings'] = array_merge($warnings, $payload['warnings']);
-
-                        if ($stalenessReport->stale) {
-                            $payload['staleness'] = $stalenessReport->toArray();
-                            $payload['warnings'] = array_merge(
-                                $payload['warnings'],
-                                [$stalenessReport->summaryWarning()]
-                            );
-                        }
+                        $payload = $this->attachProjectWarnings($payload, $container, $stalenessReport);
 
                         $payload = $this->attachProjectMetadata($payload, $container->configResolution());
 
@@ -553,28 +534,20 @@ DESC . ' ' . $supportSummary,
 
                     $projectPath = $this->normalizeProjectPath((string) ($args['project'] ?? ''));
                     $this->assertProjectPathExists($projectPath);
-                    $container = new Container($projectPath, true);
-                    $stalenessReport = $container->checkStaleness()->execute();
-                    $container->analyzeProject()->execute();
+                    [$container, $stalenessReport] = $this->prepareProject($projectPath);
 
                     $result = $builder->lookupProject($projectPath, $container->getFlow(), $targetType, $target, $format, $depth);
 
                     if (is_string($result)) {
                         $diagram = $this->prefixDiagramFallbackNote($result, $container->configResolution());
-                        if ($stalenessReport->stale) {
-                            $diagram = '> **Warning:** ' . $stalenessReport->summaryWarning() . "\n\n" . $diagram;
-                        }
-                        return $diagram;
+                        return $this->prefixProjectWarnings($diagram, $container, $stalenessReport);
                     }
 
-                    $resultArray = $result->toArray();
-                    if ($stalenessReport->stale) {
-                        $resultArray['staleness'] = $stalenessReport->toArray();
-                        $resultArray['warnings'] = array_merge(
-                            is_array($resultArray['warnings'] ?? null) ? $resultArray['warnings'] : [],
-                            [$stalenessReport->summaryWarning()]
-                        );
-                    }
+                    $resultArray = $this->attachProjectWarnings(
+                        $result->toArray(),
+                        $container,
+                        $stalenessReport,
+                    );
 
                     return $this->encodeJson(
                         $this->attachProjectMetadata($resultArray, $container->configResolution()),
@@ -614,22 +587,14 @@ DESC . ' ' . $supportSummary,
                         );
                     }
 
-                    $container = new Container($projectPath, true);
-                    $stalenessReport = $container->checkStaleness()->execute();
-                    $container->analyzeProject()->execute();
+                    [$container, $stalenessReport] = $this->prepareProject($projectPath);
 
                     $builder = new ProjectFindBuilder();
                     $result = $isBatch
                         ? $builder->findManyInProject($projectPath, $container->getFlow(), $queries, $type ?: null, $limit)
                         : $builder->findInProject($projectPath, $container->getFlow(), $queries[0], $type ?: null, $limit);
 
-                    if ($stalenessReport->stale) {
-                        $result['staleness'] = $stalenessReport->toArray();
-                        $result['warnings'] = array_merge(
-                            is_array($result['warnings'] ?? null) ? $result['warnings'] : [],
-                            [$stalenessReport->summaryWarning()]
-                        );
-                    }
+                    $result = $this->attachProjectWarnings($result, $container, $stalenessReport);
 
                     return $this->encodeJson($result, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
                 }
@@ -642,16 +607,14 @@ DESC . ' ' . $supportSummary,
                     'type'       => 'object',
                     'properties' => [
                         'project'    => ['type' => 'string', 'description' => 'Absolute path to the project root.'],
-                        'entrypoint' => ['type' => 'string', 'description' => 'Optional entrypoint identifier (FQN, e.g. PHP `Namespace\\Class::method` or `<lang>:<module.path>::<member>` such as `typescript:user.service.UserService::getUser`) to scope the context subgraph.'],
+                        'entrypoint' => ['type' => 'string', 'description' => 'Optional entrypoint identifier (FQN, e.g. PHP `Namespace\\Class::method` or `<lang>:<module.path>::<member>` such as `typescript:user%2Eservice.UserService::getUser`) to scope the context subgraph.'],
                         'namespace'  => ['type' => 'string', 'description' => 'Optional namespace filter.'],
                         'minimal'    => ['type' => 'boolean', 'description' => 'When true, return a compact context (metrics only).'],
                     ],
                     'required' => ['project'],
                 ],
                 handler: function (array $args): string {
-                    $container = new Container($args['project'], true);
-                    $stalenessReport = $container->checkStaleness()->execute();
-                    $container->analyzeProject()->execute();
+                    [$container, $stalenessReport] = $this->prepareProject((string) $args['project']);
 
                     $minimal    = (bool) ($args['minimal'] ?? false);
                     $entrypoint = $args['entrypoint'] ?? null;
@@ -664,11 +627,8 @@ DESC . ' ' . $supportSummary,
                             is_string($namespace) && $namespace !== '' ? $namespace : null
                         );
 
-                        if ($stalenessReport->stale) {
-                            $markdown = '> **Warning:** ' . $stalenessReport->summaryWarning() . "\n\n" . $markdown;
-                        }
-
-                        return $this->prefixContextFallbackNote($markdown, $container->configResolution());
+                        $markdown = $this->prefixContextFallbackNote($markdown, $container->configResolution());
+                        return $this->prefixProjectWarnings($markdown, $container, $stalenessReport);
                     }
 
                     $options = $minimal ? ExportOptions::minimal() : ExportOptions::all();
@@ -688,11 +648,8 @@ DESC . ' ' . $supportSummary,
                     $dto = $container->exportContext()->execute($options);
                     $markdown = $dto->markdown;
 
-                    if ($stalenessReport->stale) {
-                        $markdown = '> **Warning:** ' . $stalenessReport->summaryWarning() . "\n\n" . $markdown;
-                    }
-
-                    return $this->prefixContextFallbackNote($markdown, $container->configResolution());
+                    $markdown = $this->prefixContextFallbackNote($markdown, $container->configResolution());
+                    return $this->prefixProjectWarnings($markdown, $container, $stalenessReport);
                 }
             ),
 
@@ -708,19 +665,10 @@ DESC . ' ' . $supportSummary,
                     'required' => ['project', 'node'],
                 ],
                 handler: function (array $args): string {
-                    $container = new Container($args['project'], true);
-                    $stalenessReport = $container->checkStaleness()->execute();
-                    $container->analyzeProject()->execute();
+                    [$container, $stalenessReport] = $this->prepareProject((string) $args['project']);
                     $dto = $container->assessNodeImpact()->execute($args['node']);
 
-                    $payload = $dto->toArray();
-                    if ($stalenessReport->stale) {
-                        $payload['staleness'] = $stalenessReport->toArray();
-                        $payload['warnings'] = array_merge(
-                            is_array($payload['warnings'] ?? null) ? $payload['warnings'] : [],
-                            [$stalenessReport->summaryWarning()]
-                        );
-                    }
+                    $payload = $this->attachProjectWarnings($dto->toArray(), $container, $stalenessReport);
 
                     return $this->encodeJson(
                         $this->attachMetadataOnly($payload, $container->configResolution()),
@@ -741,19 +689,10 @@ DESC . ' ' . $supportSummary,
                     'required' => ['project', 'node'],
                 ],
                 handler: function (array $args): string {
-                    $container = new Container($args['project'], true);
-                    $stalenessReport = $container->checkStaleness()->execute();
-                    $container->analyzeProject()->execute();
+                    [$container, $stalenessReport] = $this->prepareProject((string) $args['project']);
                     $dto = $container->scoreChangeRisk()->execute($args['node']);
 
-                    $payload = $dto->toArray();
-                    if ($stalenessReport->stale) {
-                        $payload['staleness'] = $stalenessReport->toArray();
-                        $payload['warnings'] = array_merge(
-                            is_array($payload['warnings'] ?? null) ? $payload['warnings'] : [],
-                            [$stalenessReport->summaryWarning()]
-                        );
-                    }
+                    $payload = $this->attachProjectWarnings($dto->toArray(), $container, $stalenessReport);
 
                     return $this->encodeJson(
                         $this->attachMetadataOnly($payload, $container->configResolution()),
@@ -774,19 +713,10 @@ DESC . ' ' . $supportSummary,
                     'required' => ['project', 'node'],
                 ],
                 handler: function (array $args): string {
-                    $container = new Container($args['project'], true);
-                    $stalenessReport = $container->checkStaleness()->execute();
-                    $container->analyzeProject()->execute();
+                    [$container, $stalenessReport] = $this->prepareProject((string) $args['project']);
                     $dto = $container->generateRefactorPlan()->execute($args['node']);
 
-                    $payload = $dto->toArray();
-                    if ($stalenessReport->stale) {
-                        $payload['staleness'] = $stalenessReport->toArray();
-                        $payload['warnings'] = array_merge(
-                            is_array($payload['warnings'] ?? null) ? $payload['warnings'] : [],
-                            [$stalenessReport->summaryWarning()]
-                        );
-                    }
+                    $payload = $this->attachProjectWarnings($dto->toArray(), $container, $stalenessReport);
 
                     return $this->encodeJson(
                         $this->attachMetadataOnly($payload, $container->configResolution()),
@@ -812,6 +742,63 @@ DESC . ' ' . $supportSummary,
             'detectedProjectLanguages' => $detectedProjectLanguages,
             'summary' => $languageSupportCatalog->payloadSummary(),
         ];
+    }
+
+    /**
+     * @return array{Container, StalenessReport}
+     */
+    private function prepareProject(string $projectPath): array
+    {
+        $projectPath = $this->normalizeProjectPath($projectPath);
+        $this->assertProjectPathExists($projectPath);
+
+        $container = new Container($projectPath, true);
+        $stalenessReport = $container->checkStaleness()->execute();
+        $container->analyzeProject()->execute();
+
+        return [$container, $stalenessReport];
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function attachProjectWarnings(
+        array $payload,
+        Container $container,
+        StalenessReport $stalenessReport,
+    ): array {
+        $warnings = array_merge(
+            is_array($payload['warnings'] ?? null) ? $payload['warnings'] : [],
+            $container->analysisWarnings(),
+        );
+
+        if ($stalenessReport->stale) {
+            $payload['staleness'] = $stalenessReport->toArray();
+            $warnings[] = $stalenessReport->summaryWarning();
+        }
+
+        $payload['warnings'] = array_values(array_unique(array_filter($warnings, 'is_string')));
+        return $payload;
+    }
+
+    private function prefixProjectWarnings(
+        string $markdown,
+        Container $container,
+        StalenessReport $stalenessReport,
+    ): string {
+        $warnings = $container->analysisWarnings();
+        if ($stalenessReport->stale) {
+            $warnings[] = $stalenessReport->summaryWarning();
+        }
+        $warnings = array_values(array_unique($warnings));
+        if ($warnings === []) {
+            return $markdown;
+        }
+
+        $prefix = implode("\n", array_map(
+            static fn(string $warning): string => '> **Warning:** ' . $warning,
+            $warnings,
+        ));
+
+        return $prefix . "\n\n" . $markdown;
     }
 
     /**
@@ -1354,6 +1341,21 @@ DESC . ' ' . $supportSummary,
         $payload['metadata']['configResolution'] = $this->catalogConfigResolution($services);
 
         $warnings = is_array($payload['warnings'] ?? null) ? $payload['warnings'] : [];
+        $staleServices = [];
+        foreach ($services as $service) {
+            foreach ($service->analysisWarnings as $warning) {
+                if (is_string($warning) && $warning !== '') {
+                    $warnings[] = sprintf('%s: %s', $service->name, $warning);
+                }
+            }
+            if ($service->staleness !== null) {
+                $staleServices[$service->name] = $service->staleness;
+            }
+        }
+        if ($staleServices !== []) {
+            $payload['metadata']['staleness'] = $staleServices;
+        }
+
         $inferred = array_values(array_filter(
             $services,
             static fn($service): bool => (($service->configResolution['mode'] ?? 'explicit_config') === 'inferred_read_only')
@@ -1416,20 +1418,35 @@ DESC . ' ' . $supportSummary,
      */
     private function prefixCatalogFallbackNote(string $markdown, array $services): string
     {
+        $warnings = [];
+        foreach ($services as $service) {
+            foreach ($service->analysisWarnings as $warning) {
+                if (is_string($warning) && $warning !== '') {
+                    $warnings[] = sprintf('%s: %s', $service->name, $warning);
+                }
+            }
+        }
+
         $inferred = array_values(array_filter(
             $services,
             static fn($service): bool => (($service->configResolution['mode'] ?? 'explicit_config') === 'inferred_read_only')
         ));
 
-        if ($inferred === []) {
+        if ($inferred !== []) {
+            $warnings[] = sprintf(
+                'Catalog includes services analyzed without flow-engine.json: %s.',
+                implode(', ', array_map(static fn($service): string => $service->name, $inferred))
+            );
+        }
+
+        if ($warnings === []) {
             return $markdown;
         }
 
-        return sprintf(
-            "Note: catalog includes services analyzed without flow-engine.json: %s.\n\n%s",
-            implode(', ', array_map(static fn($service): string => $service->name, $inferred)),
-            $markdown
-        );
+        return implode("\n", array_map(
+            static fn(string $warning): string => '> **Warning:** ' . $warning,
+            array_values(array_unique($warnings)),
+        )) . "\n\n" . $markdown;
     }
 
     private function projectInferenceWarning(ConfigResolution $configResolution): string

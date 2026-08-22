@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased - Reliability hardening
+
+- Pruned ignored directories before recursive descent, reported unreadable source directories, and kept explicitly configured unreadable roots as hard failures.
+- Replaced timestamp-and-size cache keys with content fingerprints, included all graph-producing code and installed dependency metadata in cache validity, rejected source changes during analysis, added private state directories, made multi-file caches transactional, and made corrupt or structurally invalid flow, per-file, and report payloads recover as cache misses.
+- Made MCP project preparation refresh stale caches before returning results and propagate source-file and `flow-engine.json` refreshes, corruption, duplicate-ID, and unreadable-directory warnings through every code-analysis project tool.
+- Kept infrastructure mapping independent of source-analysis configuration failures while reporting them as non-blocking warnings.
+- Reduced watch heartbeats to one input fingerprint pass without graph deserialization and repaired native watches after directory replacement.
+- Corrected Python and TypeScript lexical-scope detection so local helpers and test doubles do not become graph nodes; Python property setters no longer duplicate their getter node, and TypeScript namespace, module, and path IDs use reversible segment boundaries and resolve calls through lexical ancestors. TypeScript IDs for dotted filenames are intentionally migrated (`users.controller` becomes `users%2Econtroller`).
+- Disambiguated Go node IDs by an explicit relative-path boundary and declared package when needed. Nested Go IDs intentionally migrate to the `go:~path~.<directory>` form; root-level Go files retain their declared package name, and the original one-argument parser constructor remains supported.
+- Made PHPUnit notices fail the test command, added Composer metadata validation to CI, and documented the local PR baseline workflow.
+- Made native watch recursive across configured source roots, track newly created non-ignored directories, reuse the scanner's mandatory exclusions, detect the first file after an empty analysis, and periodically verify content as a safety net.
+- Included the detected framework in the analysis signature so adding or removing framework markers invalidates visibility-sensitive flow caches.
+
 ## 0.1.3 - Documentation coherence
 
 - Rewrote `docs/configuration.md` to match the real `flow-engine.json` schema (`version`, `context.type`, `scan.include/exclude/extensions`, `architecture.layers` as namespace prefixes, `snapshots.keep`) and dropped fields that were never read (`paths`, top-level `exclude`, `languages`, `architecture.rules`, `snapshots.retention`).

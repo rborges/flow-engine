@@ -12,11 +12,14 @@ use FlowEngine\Domain\Contracts\ProjectContext;
 use FlowEngine\Domain\Flow\Edge;
 use FlowEngine\Domain\Flow\Node;
 use FlowEngine\Infrastructure\Analyzer\ProjectScanner;
+use FlowEngine\Infrastructure\Analyzer\ScanDiagnosticsProvider;
 use FlowEngine\Infrastructure\Analyzer\FileParser;
 use FlowEngine\Infrastructure\Analyzer\FlowBuilder;
 use FlowEngine\Infrastructure\Analyzer\CrossLanguageEdgeDetector;
 use FlowEngine\Infrastructure\Cache\FlowCache;
 use FlowEngine\Infrastructure\Cache\PerFileCache;
+use FlowEngine\Infrastructure\Cache\AnalysisSignature;
+use FlowEngine\Infrastructure\Cache\ContentFingerprint;
 
 final class AstFlowRepository implements FlowRepository
 {
@@ -26,6 +29,9 @@ final class AstFlowRepository implements FlowRepository
     /** @var string[] */
     private array $duplicateIds = [];
 
+    /** @var string[] */
+    private array $scanWarnings = [];
+
     public function __construct(
         private ProjectScanner $scanner,
         private FileParser $parser,
@@ -33,7 +39,8 @@ final class AstFlowRepository implements FlowRepository
         private ProjectContext $context,
         private ?FlowCache $cache = null,
         private ?CrossLanguageEdgeDetector $crossLanguageDetector = null,
-        private ?PerFileCache $perFileCache = null
+        private ?PerFileCache $perFileCache = null,
+        private string $analysisContext = '',
     ) {
     }
 
@@ -49,13 +56,21 @@ final class AstFlowRepository implements FlowRepository
         $this->context->boot();
 
         $files = $this->scanner->scan($this->context);
+        $this->scanWarnings = $this->scanner instanceof ScanDiagnosticsProvider
+            ? $this->scanner->scanWarnings()
+            : [];
 
         $configPath = $this->context->rootPath() . DIRECTORY_SEPARATOR . 'flow-engine.json';
+        $parserSignature = $this->parserSignature();
+        $sourceFingerprints = $this->captureSourceFingerprints($files);
+        $configFingerprint = ContentFingerprint::file($configPath);
 
-        if ($this->cache && $this->cache->isValid($files, $configPath)) {
-            $this->flow = $this->cache->loadFlow();
-            $this->cacheHash = $this->cache->computeHash($files, $configPath);
-            $this->duplicateIds = $this->cache->loadDuplicateIds();
+        $cachedFlow = $this->cache?->loadValidFlow($files, $configPath, $parserSignature);
+        if ($cachedFlow !== null) {
+            $this->assertSourceStateUnchanged($sourceFingerprints, $configPath, $configFingerprint);
+            $this->flow = $cachedFlow['flow'];
+            $this->cacheHash = $cachedFlow['hash'];
+            $this->duplicateIds = $cachedFlow['duplicateIds'];
             return;
         }
 
@@ -64,10 +79,9 @@ final class AstFlowRepository implements FlowRepository
         $nodes   = [];
         $edges   = [];
         $symbols = [];
-        $parserSignature = $this->parserSignature();
 
         foreach ($files as $file) {
-            $fp = PerFileCache::fingerprint($file) . '|parser:' . $parserSignature;
+            $fp = $file . '|' . $sourceFingerprints[$file] . '|parser:' . $parserSignature;
 
             if (isset($cached[$file]) && $cached[$file]['fp'] === $fp) {
                 $entry = $cached[$file];
@@ -111,53 +125,72 @@ final class AstFlowRepository implements FlowRepository
             }
         }
 
-        $this->perFileCache?->save($newMap);
-
         if ($this->crossLanguageDetector !== null) {
             $edges = $this->crossLanguageDetector->detect($nodes, $edges);
         }
 
         $symbolIndex = new SymbolIndex($symbols);
-        $this->flow = $this->builder->build($nodes, $edges, $symbolIndex);
-        $this->duplicateIds = $this->builder->lastDuplicateIds();
+        $flow = $this->builder->build($nodes, $edges, $symbolIndex);
+        $duplicateIds = $this->builder->lastDuplicateIds();
+
+        $this->assertSourceStateUnchanged($sourceFingerprints, $configPath, $configFingerprint);
+        $this->perFileCache?->save($newMap);
 
         if ($this->cache) {
-            $this->cache->saveFlow($this->flow, $files, $configPath, $this->duplicateIds);
-            $this->cacheHash = $this->cache->computeHash($files, $configPath);
+            $cacheHash = $this->cache->saveFlow(
+                $flow,
+                $files,
+                $configPath,
+                $duplicateIds,
+                $parserSignature,
+                $sourceFingerprints,
+                $configFingerprint,
+            );
         }
+
+        $this->assertSourceStateUnchanged($sourceFingerprints, $configPath, $configFingerprint);
+        $this->flow = $flow;
+        $this->duplicateIds = $duplicateIds;
+        $this->cacheHash = $cacheHash ?? null;
     }
 
     private function parserSignature(): string
     {
-        $analyzerDir = realpath(__DIR__ . '/../Analyzer');
-        if ($analyzerDir === false) {
-            return 'no-analyzer-dir';
-        }
+        return AnalysisSignature::compute($this->analysisContext);
+    }
 
-        $files = [];
-        $it = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($analyzerDir, \RecursiveDirectoryIterator::SKIP_DOTS)
-        );
-        foreach ($it as $entry) {
-            if (!$entry->isFile()) {
-                continue;
-            }
-            if (strtolower($entry->getExtension()) !== 'php') {
-                continue;
-            }
-            $files[] = $entry->getPathname();
-        }
-
+    /**
+     * @param string[] $files
+     * @return array<string, string>
+     */
+    private function captureSourceFingerprints(array $files): array
+    {
         sort($files);
-        $hash = hash_init('sha1');
+        $fingerprints = [];
         foreach ($files as $file) {
-            if (!is_file($file)) {
-                continue;
-            }
-            hash_update($hash, $file . '|' . filemtime($file) . '|' . filesize($file));
+            $fingerprints[$file] = ContentFingerprint::file($file, false);
         }
 
-        return hash_final($hash);
+        return $fingerprints;
+    }
+
+    /** @param array<string, string> $expectedFingerprints */
+    private function assertSourceStateUnchanged(
+        array $expectedFingerprints,
+        string $configPath,
+        string $expectedConfigFingerprint,
+    ): void {
+        if ($this->cache === null && $this->perFileCache === null) {
+            return;
+        }
+
+        $currentFiles = $this->scanner->scan($this->context);
+        if (
+            $this->captureSourceFingerprints($currentFiles) !== $expectedFingerprints
+            || ContentFingerprint::file($configPath) !== $expectedConfigFingerprint
+        ) {
+            throw new \RuntimeException('Project sources changed during analysis; retry to avoid publishing a stale graph');
+        }
     }
 
     public function getNodes(): array
@@ -211,5 +244,26 @@ final class AstFlowRepository implements FlowRepository
     {
         $this->ensureAnalyzed();
         return $this->duplicateIds;
+    }
+
+    /**
+     * @return string[]
+     */
+    public function scanWarnings(): array
+    {
+        $this->ensureAnalyzed();
+        return $this->scanWarnings;
+    }
+
+    /**
+     * @return string[]
+     */
+    public function cacheWarnings(): array
+    {
+        $this->ensureAnalyzed();
+        return array_values(array_unique(array_merge(
+            $this->cache?->warnings() ?? [],
+            $this->perFileCache?->warnings() ?? [],
+        )));
     }
 }

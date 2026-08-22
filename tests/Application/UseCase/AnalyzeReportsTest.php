@@ -20,7 +20,7 @@ final class AnalyzeReportsTest extends TestCase
 {
     private function repositoryWithFlow(Flow $flow): FlowRepository
     {
-        $repository = $this->createMock(FlowRepository::class);
+        $repository = $this->createStub(FlowRepository::class);
         $repository->method('getFlow')->willReturn($flow);
         return $repository;
     }

@@ -4,6 +4,7 @@ namespace Tests\Application\MCP;
 
 use FlowEngine\Application\MCP\McpServer;
 use FlowEngine\Bootstrap\Container;
+use FlowEngine\Infrastructure\Paths\StateDirectory;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
@@ -351,6 +352,23 @@ class McpServerTest extends TestCase
         $this->assertStringNotContainsString('node_modules', $composeFiles);
     }
 
+    public function test_flow_infra_map_does_not_depend_on_valid_source_analysis_config(): void
+    {
+        $project = $this->createInfraOnlyProjectFixture();
+        file_put_contents($project . '/flow-engine.json', '{invalid');
+
+        $payload = $this->dispatchJsonTool('flow_infra_map', [
+            'project' => $project,
+        ]);
+
+        self::assertSame('infra_map', $payload['kind']);
+        self::assertNotEmpty($payload['docker']['detectedComposeFiles']);
+        self::assertStringContainsString(
+            'Source analysis configuration is invalid',
+            implode("\n", $payload['warnings']),
+        );
+    }
+
     public function test_flow_map_without_code_nodes_points_to_infra_map(): void
     {
         $project = $this->createUnsupportedProjectFixture();
@@ -455,6 +473,39 @@ class McpServerTest extends TestCase
         $this->assertSame(['php', 'blade'], $payload['capabilities']['detectedProjectLanguages']);
     }
 
+    public function test_catalog_code_analysis_tools_propagate_service_cache_warnings(): void
+    {
+        $catalog = $this->createCatalogFixture();
+        $serviceRoot = dirname($catalog) . '/svc-a';
+        $stateRoot = dirname($catalog) . '/catalog-state';
+        $originalState = getenv('FLOW_ENGINE_STATE_DIR') ?: '';
+        putenv('FLOW_ENGINE_STATE_DIR=' . $stateRoot);
+
+        try {
+            $this->dispatchJsonTool('flow_map', ['catalog' => $catalog]);
+            $flowFile = StateDirectory::forProjectRoot($serviceRoot) . '/cache/flow.json.gz';
+            file_put_contents($flowFile, 'corrupt');
+
+            $payload = $this->dispatchJsonTool('flow_map', ['catalog' => $catalog]);
+            self::assertStringContainsString(
+                'svc-a: Flow cache is corrupt',
+                implode("\n", $payload['warnings'] ?? []),
+            );
+
+            file_put_contents($flowFile, 'corrupt');
+            $markdown = $this->dispatchTextTool('flow_lookup', [
+                'catalog' => $catalog,
+                'targetType' => 'service',
+                'target' => 'svc-a',
+                'format' => 'diagram',
+            ]);
+            self::assertStringContainsString('**Warning:** svc-a: Flow cache is corrupt', $markdown);
+
+        } finally {
+            putenv($originalState === '' ? 'FLOW_ENGINE_STATE_DIR' : 'FLOW_ENGINE_STATE_DIR=' . $originalState);
+        }
+    }
+
     public function test_flow_infra_map_catalog_summary_counts_service_sections(): void
     {
         $catalog = $this->createInfraCatalogFixture();
@@ -467,6 +518,21 @@ class McpServerTest extends TestCase
         $this->assertSame('catalog', $payload['scope']);
         $this->assertSame(1, $payload['summary']['proxyFileCount']);
         $this->assertNotEmpty($payload['services'][0]['proxy']['files']);
+    }
+
+    public function test_flow_infra_map_catalog_does_not_depend_on_service_source_config(): void
+    {
+        $catalog = $this->createInfraCatalogFixture();
+        file_put_contents(dirname($catalog) . '/infra-catalog-svc/flow-engine.json', '{invalid');
+
+        $payload = $this->dispatchJsonTool('flow_infra_map', ['catalog' => $catalog]);
+
+        self::assertSame('catalog', $payload['scope']);
+        self::assertNotEmpty($payload['services'][0]['proxy']['files']);
+        self::assertStringContainsString(
+            'Source analysis configuration is invalid',
+            implode("\n", $payload['warnings']),
+        );
     }
 
     public function test_flow_infra_map_invalid_sections_returns_error(): void
@@ -2190,6 +2256,69 @@ PHP);
         $this->assertSame('lookup_result', $payload['kind']);
         $this->assertSame('node', $payload['targetType']);
         $this->assertSame('App\\Http\\OrderController::store', $payload['target']);
+    }
+
+    public function test_analysis_warnings_are_propagated_by_direct_project_tools(): void
+    {
+        $project = $this->createProjectFixture();
+        $stateRoot = $this->tmpDir . '-state';
+        $originalState = getenv('FLOW_ENGINE_STATE_DIR') ?: '';
+        putenv('FLOW_ENGINE_STATE_DIR=' . $stateRoot);
+
+        try {
+            $this->dispatchJsonTool('flow_map', ['project' => $project]);
+            $flowFile = StateDirectory::forProjectRoot($project) . '/cache/flow.json.gz';
+            $tools = [
+                ['flow_lookup', [
+                    'project' => $project,
+                    'targetType' => 'node',
+                    'target' => 'App\\Http\\OrderController::store',
+                ]],
+                ['flow_find', ['project' => $project, 'query' => 'OrderController']],
+                ['flow_impact', [
+                    'project' => $project,
+                    'node' => 'App\\Http\\OrderController::store',
+                ]],
+            ];
+
+            foreach ($tools as [$tool, $arguments]) {
+                file_put_contents($flowFile, 'corrupt');
+                $payload = $this->dispatchJsonTool($tool, $arguments);
+                self::assertStringContainsString(
+                    'Flow cache is corrupt',
+                    implode("\n", $payload['warnings'] ?? []),
+                    $tool,
+                );
+            }
+        } finally {
+            putenv($originalState === '' ? 'FLOW_ENGINE_STATE_DIR' : 'FLOW_ENGINE_STATE_DIR=' . $originalState);
+            $this->deleteDirectory($stateRoot);
+        }
+    }
+
+    public function test_flow_map_reports_configuration_only_refresh(): void
+    {
+        $project = $this->createProjectFixture();
+        $stateRoot = $this->tmpDir . '-config-state';
+        $originalState = getenv('FLOW_ENGINE_STATE_DIR') ?: '';
+        putenv('FLOW_ENGINE_STATE_DIR=' . $stateRoot);
+
+        try {
+            $this->dispatchJsonTool('flow_map', ['project' => $project]);
+            $config = $project . '/flow-engine.json';
+            $configuration = json_decode((string) file_get_contents($config), true, flags: JSON_THROW_ON_ERROR);
+            $configuration['scan']['exclude'][] = 'generated';
+            file_put_contents($config, json_encode($configuration, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+
+            $payload = $this->dispatchJsonTool('flow_map', ['project' => $project]);
+
+            self::assertTrue($payload['staleness']['configChanged']);
+            self::assertSame(1, $payload['staleness']['counts']['configuration']);
+            self::assertStringContainsString('flow-engine.json', implode("\n", $payload['warnings']));
+        } finally {
+            putenv($originalState === '' ? 'FLOW_ENGINE_STATE_DIR' : 'FLOW_ENGINE_STATE_DIR=' . $originalState);
+            $this->deleteDirectory($stateRoot);
+        }
     }
 
     // Scenario 18: Not-found in batch doesn't abort other results (mix valid + invalid)

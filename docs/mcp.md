@@ -54,6 +54,16 @@ The repository includes `.mcp.json`:
 
 All tools are local and read-only.
 
+Code-analysis project tools validate the local content cache and refresh it automatically before building a
+response. When source files or `flow-engine.json` changed, the response reports what triggered the refresh; no second tool
+call is required. Ignored unreadable directories are pruned, while unreadable directories in the
+active source scope are returned as explicit warnings. Every code-analysis project tool propagates analysis
+warnings, including cache corruption and duplicate node IDs; Markdown tools render them before the
+result and JSON tools return them in `warnings`. `flow_infra_map` remains independent of source
+analysis configuration so Docker, proxy, web, scripts, and file inventory stay available when code
+configuration is invalid or a source root is unreadable. Invalid source configuration is reported as
+a non-blocking warning in the infrastructure response.
+
 ## Tool Annotations
 
 Every tool declares the standard [MCP tool annotations](https://modelcontextprotocol.io/specification/2025-03-26/server/tools#tool-annotations)

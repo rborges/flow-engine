@@ -8,6 +8,112 @@ use PHPUnit\Framework\TestCase;
 
 final class PythonParserTest extends TestCase
 {
+    public function test_ignores_nested_definitions_and_deduplicates_property_accessors(): void
+    {
+        $root = sys_get_temp_dir() . '/python-parser-scope-' . uniqid();
+        mkdir($root, 0777, true);
+        $file = $root . '/scope.py';
+        file_put_contents($file, <<<'PY'
+def outer():
+    class FakeClient:
+        def fetch(self):
+            return None
+    def helper():
+        return None
+    notify()
+
+def notify():
+    pass
+
+class Service:
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, new_value):
+        self._value = new_value
+
+    async def run(self):
+        def nested():
+            return None
+        notify()
+        class Local:
+            def work(self):
+                return None
+        notify()
+PY);
+
+        try {
+            $result = (new PythonParser(new DefaultNodeFactory(), $root))->parse($file);
+            $ids = array_map(static fn($node): string => $node->id(), $result['nodes']);
+            $edgePairs = array_map(static fn($edge): array => [$edge->from(), $edge->to()], $result['edges']);
+
+            self::assertContains('python:scope::outer', $ids);
+            self::assertContains('python:scope.Service::value', $ids);
+            self::assertContains('python:scope.Service::run', $ids);
+            self::assertSame(1, count(array_filter($ids, static fn(string $id): bool => $id === 'python:scope.Service::value')));
+            self::assertNotContains('python:scope.FakeClient::fetch', $ids);
+            self::assertNotContains('python:scope.Service::helper', $ids);
+            self::assertNotContains('python:scope.Service::nested', $ids);
+            self::assertNotContains('python:scope.Local::work', $ids);
+            self::assertContains(['python:scope::outer', 'python:scope::notify'], $edgePairs);
+            self::assertSame(2, count(array_filter(
+                $edgePairs,
+                static fn(array $edge): bool => $edge === ['python:scope.Service::run', 'python:scope::notify']
+            )));
+        } finally {
+            unlink($file);
+            rmdir($root);
+        }
+    }
+
+    public function test_keeps_module_control_block_classes_and_setter_dependencies(): void
+    {
+        $root = sys_get_temp_dir() . '/python-parser-conditional-' . uniqid();
+        mkdir($root, 0777, true);
+        $file = $root . '/conditional.py';
+        file_put_contents($file, <<<'PY'
+def notify():
+    pass
+
+class First:
+    def one(self):
+        pass
+
+if True:
+    class Service:
+        @property
+        def value(self):
+            return self._value
+
+        @value.setter
+        def value(self, new_value):
+            notify()
+            self._value = new_value
+PY);
+
+        try {
+            $result = (new PythonParser(new DefaultNodeFactory(), $root))->parse($file);
+            $ids = array_map(static fn($node): string => $node->id(), $result['nodes']);
+            $edgePairs = array_map(static fn($edge): array => [$edge->from(), $edge->to()], $result['edges']);
+
+            self::assertContains('python:conditional.Service::value', $ids);
+            self::assertContains('python:conditional.First::one', $ids);
+            self::assertSame(1, count(array_filter(
+                $ids,
+                static fn(string $id): bool => $id === 'python:conditional.Service::value'
+            )));
+            self::assertContains(
+                ['python:conditional.Service::value', 'python:conditional::notify'],
+                $edgePairs
+            );
+        } finally {
+            unlink($file);
+            rmdir($root);
+        }
+    }
+
     public function test_it_extracts_nodes_and_simple_edges(): void
     {
         $root = realpath(__DIR__ . '/../Fixtures/ExampleProject');
@@ -257,4 +363,3 @@ final class PythonParserTest extends TestCase
         self::assertNull($helper->metadata());
     }
 }
-

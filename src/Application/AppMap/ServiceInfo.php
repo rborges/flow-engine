@@ -23,6 +23,8 @@ final readonly class ServiceInfo
         public array $configuredScanLanguages = [],
         public array $detectedLanguages = [],
         public ?array $configResolution = null,
+        public array $analysisWarnings = [],
+        public ?array $staleness = null,
     ) {
     }
 
@@ -80,6 +82,12 @@ final readonly class ServiceInfo
 
         if ($this->configResolution !== null) {
             $payload['configResolution'] = $this->configResolution;
+        }
+        if ($this->analysisWarnings !== []) {
+            $payload['warnings'] = $this->analysisWarnings;
+        }
+        if ($this->staleness !== null) {
+            $payload['staleness'] = $this->staleness;
         }
 
         return $payload;

@@ -55,7 +55,7 @@ final class InterpretChangeImpactTest extends TestCase
             ]
         );
 
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('send')->willReturn(new LLMResponse(
             content: 'Service::handle is a moderate-risk node with blast radius of 1.',
             tokensUsed: 350,

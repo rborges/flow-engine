@@ -49,7 +49,7 @@ final class InterpretImpactTest extends TestCase
             ]
         );
 
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('send')->willReturn(new LLMResponse(
             content: 'Service::handle is a central node.',
             tokensUsed: 150,

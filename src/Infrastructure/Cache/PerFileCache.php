@@ -12,7 +12,7 @@ use RuntimeException;
  * Storage: <stateDir>/cache/per-file.json.gz
  *
  * Each entry is keyed by absolute file path and stores:
- *   - fp: fingerprint string ("path|mtime|size" or "path|missing")
+ *   - fp: content fingerprint string
  *   - nodes: raw serialized node arrays (pre-visibility)
  *   - edges: raw serialized edge arrays
  *
@@ -21,6 +21,8 @@ use RuntimeException;
 final class PerFileCache
 {
     private string $cacheFile;
+    /** @var string[] */
+    private array $warnings = [];
 
     public function __construct(ProjectContext $context)
     {
@@ -30,15 +32,11 @@ final class PerFileCache
 
     /**
      * Returns a fingerprint string for the given file path.
-     * Format: "path|mtime|size" or "path|missing" if the file does not exist.
+     * The path and file content are both represented in the fingerprint.
      */
     public static function fingerprint(string $path): string
     {
-        if (!file_exists($path)) {
-            return $path . '|missing';
-        }
-
-        return $path . '|' . filemtime($path) . '|' . filesize($path);
+        return ContentFingerprint::file($path);
     }
 
     /**
@@ -55,18 +53,29 @@ final class PerFileCache
         $compressed = file_get_contents($this->cacheFile);
 
         if ($compressed === false) {
+            $this->warnings[] = sprintf('Per-file cache could not be read and will be rebuilt: %s', $this->cacheFile);
             return [];
         }
 
-        $json = gzdecode($compressed);
+        $json = @gzdecode($compressed);
 
         if ($json === false) {
+            $this->warnings[] = sprintf('Per-file cache is corrupt and will be rebuilt: %s', $this->cacheFile);
             return [];
         }
 
         $data = json_decode($json, true);
+        if (!is_array($data)) {
+            $this->warnings[] = sprintf('Per-file cache contains invalid JSON and will be rebuilt: %s', $this->cacheFile);
+            return [];
+        }
 
-        return is_array($data) ? $data : [];
+        if (!$this->isValidCacheMap($data)) {
+            $this->warnings[] = sprintf('Per-file cache has an invalid structure and will be rebuilt: %s', $this->cacheFile);
+            return [];
+        }
+
+        return $data;
     }
 
     /**
@@ -76,12 +85,6 @@ final class PerFileCache
      */
     public function save(array $results): void
     {
-        $dir = dirname($this->cacheFile);
-
-        if (!is_dir($dir)) {
-            mkdir($dir, 0777, true);
-        }
-
         $json = json_encode($results, JSON_THROW_ON_ERROR);
         $compressed = gzencode($json, 6);
 
@@ -89,6 +92,76 @@ final class PerFileCache
             throw new RuntimeException('Failed to compress per-file cache');
         }
 
-        file_put_contents($this->cacheFile, $compressed);
+        AtomicFileWriter::write($this->cacheFile, $compressed);
+    }
+
+    /**
+     * @return string[]
+     */
+    public function warnings(): array
+    {
+        return array_values(array_unique($this->warnings));
+    }
+
+    /** @param array<mixed> $data */
+    private function isValidCacheMap(array $data): bool
+    {
+        foreach ($data as $path => $entry) {
+            if (
+                !is_string($path)
+                || !is_array($entry)
+                || !is_string($entry['fp'] ?? null)
+                || !is_array($entry['nodes'] ?? null)
+                || !is_array($entry['edges'] ?? null)
+                || (isset($entry['symbols']) && !is_array($entry['symbols']))
+            ) {
+                return false;
+            }
+
+            foreach ($entry['nodes'] as $node) {
+                if (!$this->isValidNode($node)) {
+                    return false;
+                }
+            }
+            foreach ($entry['edges'] as $edge) {
+                if (!$this->hasStringFields($edge, ['from', 'to', 'method', 'type'])) {
+                    return false;
+                }
+            }
+            foreach ($entry['symbols'] ?? [] as $symbol) {
+                if (
+                    !$this->hasStringFields($symbol, ['id', 'name', 'kind', 'file'])
+                    || !is_int($symbol['line'] ?? null)
+                    || (isset($symbol['sourceModule']) && !is_string($symbol['sourceModule']))
+                ) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private function isValidNode(mixed $node): bool
+    {
+        return $this->hasStringFields($node, ['class', 'method', 'file', 'lang'])
+            && is_int($node['line'] ?? null)
+            && (!isset($node['meta']) || is_array($node['meta']));
+    }
+
+    /** @param string[] $fields */
+    private function hasStringFields(mixed $value, array $fields): bool
+    {
+        if (!is_array($value)) {
+            return false;
+        }
+
+        foreach ($fields as $field) {
+            if (!isset($value[$field]) || !is_string($value[$field])) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
