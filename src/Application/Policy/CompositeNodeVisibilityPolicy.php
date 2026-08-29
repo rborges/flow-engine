@@ -28,6 +28,14 @@ class CompositeNodeVisibilityPolicy implements NodeVisibilityPolicy
 
     public function visibility(Node $node): ?NodeVisibility
     {
+        // Report is scoped to a single visibility() resolution: report() is meant
+        // to explain *this* node's decision (see NodeVisibilityResolver::explain()).
+        // Without this reset, every prior node's decisions would stay in the
+        // report forever: compose() below would re-walk an ever-growing list on
+        // every call -- quadratic over the whole node set -- and report() would
+        // return stale results.
+        $this->report = new VisibilityResolutionReport();
+
         foreach ($this->policies as $policy) {
             $visibility = $policy->visibility($node);
 
@@ -64,6 +72,9 @@ class CompositeNodeVisibilityPolicy implements NodeVisibilityPolicy
         return $this->strategy->compose($this->report->results());
     }
 
+    /**
+     * Scoped to the most recent visibility() call; empty before the first one.
+     */
     public function report(): VisibilityResolutionReport
     {
         return $this->report;
