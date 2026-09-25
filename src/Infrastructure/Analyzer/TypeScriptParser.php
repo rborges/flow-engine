@@ -21,6 +21,9 @@ final class TypeScriptParser implements FileParser
 {
     private const NAMESPACE_PATTERN = '/^(?:(?:(?:export|declare)\s+)*(?:namespace|module)\s+(?<name>[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|["\'][^"\']+["\'])|declare\s+(?<global>global))\s*(?<open>\{)?\s*(?<trivia>(?:\/\/.*|\/\*.*)?)$/';
 
+    /** Bytes of preceding code that the per-character heuristics may inspect. */
+    private const LOOKBEHIND_BYTES = 4096;
+
     private bool $jsxSyntax = false;
 
     public function __construct(
@@ -1504,8 +1507,13 @@ final class TypeScriptParser implements FileParser
                 $code .= $char;
                 continue;
             }
-            $regexContext = trim($state['previousCode'] . ' ' . $code);
-            if ($char === '/' && $this->startsRegexLiteral($regexContext, $state['lastClosedBraceKind'])) {
+            if (
+                $char === '/'
+                && $this->startsRegexLiteral(
+                    trim($this->lookbehind($state['previousCode'], $code, strlen($code))),
+                    $state['lastClosedBraceKind'],
+                )
+            ) {
                 $code .= ' ';
                 $state['regex'] = true;
                 $state['regexClass'] = false;
@@ -1515,7 +1523,7 @@ final class TypeScriptParser implements FileParser
 
             $startsGeneric = false;
             if ($char === '<' && !$inJsxText) {
-                $genericContext = rtrim($state['previousCode'] . ' ' . $code);
+                $genericContext = rtrim($this->lookbehind($state['previousCode'], $code, strlen($code)));
                 $inDeclarationBody = end($state['braceScopes']) === 'declaration';
                 $startsGeneric = $state['genericDepth'] > 0
                     || $this->startsGenericParameterList(
@@ -1541,7 +1549,7 @@ final class TypeScriptParser implements FileParser
             } elseif (
                 $char === '>'
                 && $state['genericDepth'] > 0
-                && !str_ends_with(rtrim($code), '=')
+                && !str_ends_with(rtrim(substr($code, -self::LOOKBEHIND_BYTES)), '=')
             ) {
                 $state['genericDepth']--;
             } elseif ($char === ';' && $state['genericDepth'] > 0) {
@@ -1549,7 +1557,7 @@ final class TypeScriptParser implements FileParser
             }
 
             if ($char === '{') {
-                $braceContext = trim($state['previousCode'] . ' ' . $code);
+                $braceContext = trim($this->lookbehind($state['previousCode'], $code, strlen($code)));
                 $braceKind = $state['genericDepth'] > 0 ? 'expression' : $this->openingBraceKind($braceContext);
                 $state['braceKinds'][] = $braceKind;
                 $state['braceScopes'][] = $this->openingBraceScope($braceContext);
@@ -1587,11 +1595,11 @@ final class TypeScriptParser implements FileParser
         if (trim($code) !== '') {
             $state['previousCode'] = substr(
                 trim($state['previousCode'] . ' ' . $code),
-                -4096,
+                -self::LOOKBEHIND_BYTES,
             );
             $state['jsxCodeHistory'] = substr(
                 trim($state['jsxCodeHistory'] . ' ' . $code),
-                -4096,
+                -self::LOOKBEHIND_BYTES,
             );
         }
 
@@ -1721,13 +1729,17 @@ final class TypeScriptParser implements FileParser
             return null;
         }
 
+        $states = $this->delimiterStatesAt($code, [...array_column($matches[0], 1), strlen($code)]);
+        $codeState = array_pop($states);
         for ($index = count($matches[0]) - 1; $index >= 0; $index--) {
+            if ($states[$index] !== $codeState) {
+                continue;
+            }
+
             [$keyword, $offset] = $matches[0][$index];
             $header = substr($code, $offset + strlen($keyword));
             if (
-                $this->delimiterDepth(substr($code, 0, $offset)) !== $this->delimiterDepth($code)
-                || $this->containsTopLevelSemicolon($header)
-                || substr_count($header, '{') !== substr_count($header, '}')
+                $this->containsTopLevelSemicolon($header)
                 || $this->hasCompletedConstructBody($keyword, $header)
                 || ($keyword === 'function' && preg_match('/:\s*$/', $header) === 1)
                 || ($keyword === 'function' && !str_contains($header, '('))
@@ -1763,24 +1775,45 @@ final class TypeScriptParser implements FileParser
         ) === 1;
     }
 
-    /** @return array{parentheses: int, brackets: int} */
-    private function delimiterDepth(string $code): array
+    /**
+     * Delimiter state of the text before each offset, computed in one pass over $code:
+     * the parenthesis/bracket depth (never below zero) and the count of `{` minus `}`.
+     * The text between two offsets has as many `{` as `}` when their balances match.
+     *
+     * @param list<int> $offsets ascending byte offsets
+     * @return list<array{depth: array{parentheses: int, brackets: int}, braceBalance: int}>
+     */
+    private function delimiterStatesAt(string $code, array $offsets): array
     {
+        $states = [];
         $parentheses = 0;
         $brackets = 0;
-        foreach (str_split($code) as $char) {
-            if ($char === '(') {
-                $parentheses++;
-            } elseif ($char === ')') {
-                $parentheses = max(0, $parentheses - 1);
-            } elseif ($char === '[') {
-                $brackets++;
-            } elseif ($char === ']') {
-                $brackets = max(0, $brackets - 1);
+        $braceBalance = 0;
+        $position = 0;
+        foreach ($offsets as $offset) {
+            while (($position += strcspn($code, '()[]{}', $position, $offset - $position)) < $offset) {
+                $char = $code[$position++];
+                if ($char === '(') {
+                    $parentheses++;
+                } elseif ($char === ')') {
+                    $parentheses = max(0, $parentheses - 1);
+                } elseif ($char === '[') {
+                    $brackets++;
+                } elseif ($char === ']') {
+                    $brackets = max(0, $brackets - 1);
+                } elseif ($char === '{') {
+                    $braceBalance++;
+                } else {
+                    $braceBalance--;
+                }
             }
+            $states[] = [
+                'depth' => ['parentheses' => $parentheses, 'brackets' => $brackets],
+                'braceBalance' => $braceBalance,
+            ];
         }
 
-        return ['parentheses' => $parentheses, 'brackets' => $brackets];
+        return $states;
     }
 
     private function hasCompletedConstructBody(string $keyword, string $header): bool
@@ -1789,7 +1822,10 @@ final class TypeScriptParser implements FileParser
         $brackets = 0;
         $bracePairs = 0;
         $openTopLevelBrace = false;
-        foreach (str_split($header) as $char) {
+        $length = strlen($header);
+        $position = 0;
+        while (($position += strcspn($header, '()[]{}', $position)) < $length) {
+            $char = $header[$position++];
             if ($char === '(') {
                 $parentheses++;
             } elseif ($char === ')') {
@@ -1823,7 +1859,10 @@ final class TypeScriptParser implements FileParser
         $parentheses = 0;
         $brackets = 0;
         $braces = 0;
-        foreach (str_split($code) as $char) {
+        $length = strlen($code);
+        $position = 0;
+        while (($position += strcspn($code, '()[]{};', $position)) < $length) {
+            $char = $code[$position++];
             if ($char === '(') {
                 $parentheses++;
             } elseif ($char === ')') {
@@ -1854,9 +1893,22 @@ final class TypeScriptParser implements FileParser
             || preg_match('/\b(?:return|throw|case|yield|await|new|void|typeof|delete)\s*$/', $prefix) === 1;
     }
 
+    /**
+     * The code before $end on the current line, preceded by the history of earlier
+     * lines. Bounded to LOOKBEHIND_BYTES like that history, so a single huge line
+     * (a minified bundle) cannot make every per-character check rescan the line.
+     */
+    private function lookbehind(string $history, string $line, int $end): string
+    {
+        $start = max(0, $end - self::LOOKBEHIND_BYTES);
+        $tail = substr($line, $start, $end - $start);
+
+        return $start > 0 ? $tail : $history . ' ' . $tail;
+    }
+
     private function isJsxClosingTagStart(string $code, string $next): bool
     {
-        return str_ends_with(rtrim($code), '<')
+        return str_ends_with(rtrim(substr($code, -self::LOOKBEHIND_BYTES)), '<')
             && preg_match('/[A-Za-z_$>]/', $next) === 1;
     }
 
@@ -1872,7 +1924,7 @@ final class TypeScriptParser implements FileParser
     {
         if (!$this->jsxSyntax || $structuralMask === '') {
             if (trim($structuralMask) !== '') {
-                $codeHistory = substr(trim($codeHistory . ' ' . $structuralMask), -4096);
+                $codeHistory = substr(trim($codeHistory . ' ' . $structuralMask), -self::LOOKBEHIND_BYTES);
             }
             return $structuralMask;
         }
@@ -1975,7 +2027,7 @@ final class TypeScriptParser implements FileParser
         }
 
         if (trim($structuralMask) !== '') {
-            $codeHistory = substr(trim($codeHistory . ' ' . $structuralMask), -4096);
+            $codeHistory = substr(trim($codeHistory . ' ' . $structuralMask), -self::LOOKBEHIND_BYTES);
         }
 
         return $edgeMask;
@@ -2082,17 +2134,18 @@ final class TypeScriptParser implements FileParser
             return false;
         }
         if (preg_match(
-            '/^<[A-Za-z_$][\w$]*(?:(?:\s+extends\b[^>\r\n]*)|(?:\s*,\s*))>\s*\(/',
-            substr($structuralMask, $offset),
+            '/\G<[A-Za-z_$][\w$]*(?:(?:\s+extends\b[^>\r\n]*)|(?:\s*,\s*))>\s*\(/',
+            $structuralMask,
+            offset: $offset,
         ) === 1) {
             return false;
         }
         if ($insideJsxExpression) {
-            $prefix = rtrim($codeHistory . ' ' . substr($structuralMask, 0, $offset));
+            $prefix = rtrim($this->lookbehind($codeHistory, $structuralMask, $offset));
             return $this->constructStartsExpression($prefix);
         }
 
-        $prefix = rtrim($codeHistory . ' ' . substr($structuralMask, 0, $offset));
+        $prefix = rtrim($this->lookbehind($codeHistory, $structuralMask, $offset));
         return $this->constructStartsExpression($prefix);
     }
 

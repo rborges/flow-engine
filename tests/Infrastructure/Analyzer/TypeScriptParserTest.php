@@ -2446,4 +2446,44 @@ TS);
         self::assertContains('Button', $names, 'default name from local mixed import must be indexed');
         self::assertContains('ButtonProps', $names, 'named import from local mixed must be indexed');
     }
+
+    public function test_minified_single_line_parses_in_linear_time(): void
+    {
+        // Every `{` used to rescan the whole line prefix once per earlier
+        // `function`/`class` keyword, so one bundled line took hours to parse.
+        $line = '';
+        for ($i = 0; $i < 150; $i++) {
+            $line .= "function f$i(a,b){if(a){return g$i(b,[1,2],{k:a})}var c=class C$i{m(){return h(\"s{x}\")}};return c}";
+        }
+        $file = $this->createTempFile('bundle.js', $line . "\n");
+
+        $started = hrtime(true);
+        $this->makeParser('javascript')->parse($file);
+        $seconds = (hrtime(true) - $started) / 1e9;
+
+        self::assertLessThan(10.0, $seconds, 'a ~14 KB single-line bundle must not take quadratic time');
+    }
+
+    public function test_code_after_a_line_longer_than_the_lookbehind_window_keeps_its_structure(): void
+    {
+        $entries = [];
+        for ($i = 0; $i < 400; $i++) {
+            $entries[] = "{id:$i,run:function(){return class{go(){return [$i]}}}}";
+        }
+        $file = $this->createTempFile('after-long-line.ts', 'const table = [' . implode(',', $entries) . "];\n" . <<<'TS'
+function main(): void {
+    helper();
+}
+
+function helper(): void {}
+TS);
+
+        $result = $this->makeParser()->parse($file);
+
+        $ids = array_map(fn($n) => $n->id(), $result['nodes']);
+        $edgeTos = array_map(fn($e) => $e->to(), $result['edges']);
+        self::assertContains('typescript:after-long-line::main', $ids);
+        self::assertContains('typescript:after-long-line::helper', $ids);
+        self::assertContains('typescript:after-long-line::helper', $edgeTos);
+    }
 }

@@ -12,6 +12,7 @@
 - Made PHPUnit notices fail the test command, added Composer metadata validation to CI, and documented the local PR baseline workflow.
 - Made native watch recursive across configured source roots, track newly created non-ignored directories, reuse the scanner's mandatory exclusions, detect the first file after an empty analysis, and periodically verify content as a safety net.
 - Included the detected framework in the analysis signature so adding or removing framework markers invalidates visibility-sensitive flow caches.
+- Made TypeScript/JavaScript parsing linear on long lines: function/class brace detection now derives every keyword's delimiter state from one pass instead of rescanning the context per keyword, and the per-character heuristics read the same 4096-byte lookbehind within a line that they already used across lines. A minified bundle no longer pins a CPU core for hours; files without lines over 4096 bytes parse exactly as before.
 
 ## 0.1.3 - Documentation coherence
 
