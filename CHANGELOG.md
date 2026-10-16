@@ -4,6 +4,7 @@
 
 - Static analysis no longer loads the analyzed project's autoloader, so a Composer platform check that requires a newer PHP no longer aborts `analyze`, `appmap` or `flow_map`. `inputs` and `run-guided` still load it.
 - Multi-service commands (`appmap`, `context`, `diagram`, the HTTP API and MCP catalog tools) isolate failures per service: a service that fails to analyze appears in `appmap.services[]` with `status: "failed"` and `error`, and the others are still mapped. Every service now carries `status`. `appmap` still prints the map but reports each failure on stderr and exits 1; `appmap-diff` and the drift/compliance HTTP endpoints (422) refuse maps with failed services instead of reporting their edges as removed; Markdown and Mermaid outputs mark the service as "analysis failed".
+- `init` detects Python (`requirements.txt`, `pyproject.toml`) and TypeScript/JavaScript (`package.json`, `tsconfig.json`) projects, and mixed repositories, instead of always writing a PHP config. New `context.type` values `python` and `typescript` (static-only, default extensions `py` and `ts/tsx/js/jsx`); configs using them fail on earlier engine versions with `Unsupported project context`. Read-only inference now also recognizes `tsconfig.json`.
 - The CLI `appmap` and the HTTP API now include `configResolution` per service and derive `languages` from the scanned files, matching the MCP catalog output.
 
 ## 0.1.3 - Documentation coherence

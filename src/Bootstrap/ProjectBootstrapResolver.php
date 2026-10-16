@@ -44,47 +44,17 @@ final class ProjectBootstrapResolver
 
     private const CONTEXTUAL_WORKTREE_IGNORE = '.worktrees';
 
-    private const MARKER_FILES = [
-        'artisan',
-        'composer.json',
-        'package.json',
-        'pyproject.toml',
-        'requirements.txt',
-        'go.mod',
-        'pubspec.yaml',
-    ];
-
-    private const SOURCE_ROOT_CANDIDATES = [
-        'src',
-        'app',
-        'lib',
-        'routes',
-        'resources/views',
-        'backend',
-        'backend/app',
-        'backend/src',
-        'frontend',
-        'frontend/src',
-        'server',
-        'server/src',
-        'client',
-        'client/src',
-        'apps',
-        'packages',
-        'services',
-        'cmd',
-        'internal',
-        'pkg',
-    ];
-
     private const MAX_DYNAMIC_INCLUDE_PATHS = 40;
     private const MAX_SCAN_PROBE_FILES = 5000;
+
+    private readonly ProjectProfileDetector $profile;
 
     public function __construct(
         private readonly SchemaValidator $schemaValidator,
         private readonly ?DefaultProjectContextFactory $contextFactory = null,
-        private readonly ?LanguageSupportCatalog $languageCatalog = null,
+        ?LanguageSupportCatalog $languageCatalog = null,
     ) {
+        $this->profile = new ProjectProfileDetector($languageCatalog);
     }
 
     public function resolve(string $projectPath, bool $allowReadOnlyInference = false): ProjectBootstrap
@@ -182,7 +152,7 @@ final class ProjectBootstrapResolver
             }
 
             $ignored = $commonIgnored;
-            $extensions = $this->detectExtensions($root, $includePaths, $ignored);
+            $extensions = $this->profile->detectExtensions($root, $includePaths, $ignored);
 
             return [
                 'context' => new InferredReadOnlyProjectContext(
@@ -199,9 +169,9 @@ final class ProjectBootstrapResolver
         $ignored = $commonIgnored;
         $dynamic = $this->dynamicInferenceProfile($root, $ignored);
         $includePaths = $dynamic['includePaths'];
-        $extensions = $this->detectExtensions($root, $includePaths, $ignored);
+        $extensions = $this->profile->detectExtensions($root, $includePaths, $ignored);
         if ($extensions === []) {
-            $extensions = $this->allSupportedSimpleExtensions();
+            $extensions = $this->profile->supportedExtensions();
         }
         $warnings = array_merge(
             $dynamic['warnings'],
@@ -262,14 +232,14 @@ final class ProjectBootstrapResolver
 
         foreach ($this->candidateProjectRoots($root, $ignoredPaths) as $candidateRoot) {
             $relativeRoot = $this->relativePath($root, $candidateRoot);
-            $marker = $this->markerForRoot($candidateRoot);
+            $marker = $this->profile->markerForRoot($candidateRoot);
             if ($marker !== null) {
                 $markers[$marker] = true;
             }
 
-            foreach ($this->sourceRootsForCandidate($candidateRoot, $marker) as $sourceRoot) {
+            foreach ($this->profile->sourceRootsForCandidate($candidateRoot, $marker) as $sourceRoot) {
                 $relative = $this->relativePath($root, $sourceRoot);
-                if ($relative !== '' && !$this->isIgnored($relative, $ignoredPaths)) {
+                if ($relative !== '' && !$this->profile->isIgnored($relative, $ignoredPaths)) {
                     $includePaths[$relative] = true;
                 }
             }
@@ -280,9 +250,9 @@ final class ProjectBootstrapResolver
         }
 
         if ($includePaths === []) {
-            foreach (self::SOURCE_ROOT_CANDIDATES as $candidate) {
+            foreach (ProjectProfileDetector::SOURCE_ROOT_CANDIDATES as $candidate) {
                 $path = $root . DIRECTORY_SEPARATOR . $candidate;
-                if (!is_dir($path) || $this->isIgnored($candidate, $ignoredPaths)) {
+                if (!is_dir($path) || $this->profile->isIgnored($candidate, $ignoredPaths)) {
                     continue;
                 }
                 if ($this->containsSupportedSource($path, $root, $ignoredPaths)) {
@@ -355,11 +325,11 @@ final class ProjectBootstrapResolver
                 }
 
                 $relative = $this->relativePath($root, $absolute);
-                if ($relative === '' || $this->isIgnored($relative, $ignoredPaths)) {
+                if ($relative === '' || $this->profile->isIgnored($relative, $ignoredPaths)) {
                     continue;
                 }
 
-                if ($this->markerForRoot($absolute) !== null) {
+                if ($this->profile->markerForRoot($absolute) !== null) {
                     $roots[$absolute] = $absolute;
                 }
 
@@ -395,43 +365,6 @@ final class ProjectBootstrapResolver
         ], true);
     }
 
-    private function markerForRoot(string $root): ?string
-    {
-        foreach (self::MARKER_FILES as $marker) {
-            if (is_file($root . DIRECTORY_SEPARATOR . $marker)) {
-                return $marker;
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * @return string[]
-     */
-    private function sourceRootsForCandidate(string $candidateRoot, ?string $marker): array
-    {
-        $relativeCandidates = match ($marker) {
-            'artisan' => ['app', 'routes', 'resources/views'],
-            'pubspec.yaml' => ['lib', 'test', 'integration_test', 'backend/app'],
-            'go.mod' => ['cmd', 'internal', 'pkg'],
-            'package.json' => ['src', 'app', 'server', 'client', 'routes', 'pages'],
-            'composer.json' => ['src', 'app', 'routes', 'resources/views'],
-            'pyproject.toml', 'requirements.txt' => ['src', 'app'],
-            default => self::SOURCE_ROOT_CANDIDATES,
-        };
-
-        $roots = [];
-        foreach ($relativeCandidates as $relative) {
-            $path = $candidateRoot . DIRECTORY_SEPARATOR . $relative;
-            if (is_dir($path)) {
-                $roots[] = $path;
-            }
-        }
-
-        return $roots;
-    }
-
     /**
      * @param array<string, true> $markers
      * @param string[] $includePaths
@@ -444,6 +377,10 @@ final class ProjectBootstrapResolver
 
         if (isset($markers['pubspec.yaml'])) {
             return 'flutter';
+        }
+
+        if (isset($markers['tsconfig.json'])) {
+            $markers['package.json'] = true;
         }
 
         if (isset($markers['package.json']) && (isset($markers['composer.json']) || isset($markers['go.mod']) || isset($markers['pyproject.toml']))) {
@@ -530,11 +467,11 @@ final class ProjectBootstrapResolver
             }
 
             $relative = $this->relativePath($root, $entry->getPathname());
-            if ($this->isIgnored($relative, $ignoredPaths)) {
+            if ($this->profile->isIgnored($relative, $ignoredPaths)) {
                 continue;
             }
 
-            if (in_array(strtolower((string) $entry->getExtension()), $this->allSupportedSimpleExtensions(), true)) {
+            if (in_array(strtolower((string) $entry->getExtension()), $this->profile->supportedExtensions(), true)) {
                 return true;
             }
 
@@ -556,7 +493,7 @@ final class ProjectBootstrapResolver
 
         foreach ($entries as $entry) {
             $path = $root . DIRECTORY_SEPARATOR . $entry;
-            if (is_file($path) && in_array(strtolower((string) pathinfo($path, PATHINFO_EXTENSION)), $this->allSupportedSimpleExtensions(), true)) {
+            if (is_file($path) && in_array(strtolower((string) pathinfo($path, PATHINFO_EXTENSION)), $this->profile->supportedExtensions(), true)) {
                 return true;
             }
         }
@@ -615,90 +552,6 @@ final class ProjectBootstrapResolver
         }
 
         return array_values(array_unique($existing));
-    }
-
-    /**
-     * @param string[] $includePaths
-     * @param string[] $ignoredPaths
-     * @return string[]
-     */
-    private function detectExtensions(string $root, array $includePaths, array $ignoredPaths): array
-    {
-        $detected = [];
-
-        foreach ($includePaths as $includePath) {
-            $base = $includePath === '.'
-                ? $root
-                : $root . DIRECTORY_SEPARATOR . $includePath;
-
-            if (!is_dir($base)) {
-                continue;
-            }
-
-            $iterator = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS)
-            );
-
-            foreach ($iterator as $entry) {
-                if (!$entry->isFile()) {
-                    continue;
-                }
-
-                $relative = str_replace($root . DIRECTORY_SEPARATOR, '', $entry->getPathname());
-                if ($this->isIgnored($relative, $ignoredPaths)) {
-                    continue;
-                }
-
-                $extension = strtolower((string) $entry->getExtension());
-                if (in_array($extension, $this->allSupportedSimpleExtensions(), true)) {
-                    $detected[$extension] = true;
-                }
-            }
-        }
-
-        return array_values(array_keys($detected));
-    }
-
-    /**
-     * @param string[] $ignoredPaths
-     */
-    private function isIgnored(string $relativePath, array $ignoredPaths): bool
-    {
-        foreach ($ignoredPaths as $ignoredPath) {
-            $normalized = trim(str_replace('\\', '/', $ignoredPath), '/');
-            if ($normalized === '') {
-                continue;
-            }
-
-            $relative = trim(str_replace('\\', '/', $relativePath), '/');
-            if ($relative === $normalized || str_starts_with($relative, $normalized . '/')) {
-                return true;
-            }
-
-            if (!str_contains($normalized, '/')
-                && (str_contains($relative, '/' . $normalized . '/') || str_ends_with($relative, '/' . $normalized))
-            ) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @return string[]
-     */
-    private function allSupportedSimpleExtensions(): array
-    {
-        $catalog = $this->languageCatalog ?? new LanguageSupportCatalog();
-        $extensions = [];
-        foreach ($catalog->entries() as $entry) {
-            foreach ($entry['extensions'] as $extension) {
-                $extensions[$extension] = true;
-            }
-        }
-
-        return array_keys($extensions);
     }
 
     /**

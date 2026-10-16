@@ -23,7 +23,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["composer", "wordpress", "custom", "flutter"],
+          "enum": ["composer", "wordpress", "custom", "flutter", "python", "typescript"],
           "description": "Project context type"
         },
         "autoload": {

@@ -19,6 +19,7 @@ final class DefaultProjectContextFactory implements ProjectContextFactory
             'custom' => new ComposerProjectContext($config), // best-effort boot (autoload optional)
             'flutter' => new FlutterProjectContext($config),
             'wordpress' => new WordPressProjectContext($config->rootPath()),
+            'python', 'typescript' => new StaticProjectContext($config),
 
             // Legacy alias (some configs used "php")
             'php' => new ComposerProjectContext($config),

@@ -14,7 +14,7 @@ Create one on Linux/macOS:
 php bin/engine.php init /home/me/my-app
 ```
 
-`init` writes a minimal, valid file for the detected project type (Composer or Flutter).
+`init` writes a minimal, valid file for the detected project type (Composer, Flutter, Python or TypeScript/JavaScript). In a repository with more than one language marker, `context.type` follows the main language (`composer` > `typescript` > `python`) and `scan.extensions` lists every extension found in the scanned roots.
 
 ## Minimal File
 
@@ -35,19 +35,33 @@ Three fields are required: `version`, `context.type`, and `scan.include`. A typi
 }
 ```
 
+A Python or TypeScript project:
+
+```json
+{
+  "version": "1.0",
+  "context": { "type": "typescript" },
+  "scan": {
+    "include": ["src"],
+    "exclude": ["node_modules", "dist", "build", "coverage", "tests"],
+    "extensions": ["ts", "tsx"]
+  }
+}
+```
+
 ## Fields
 
 ### Required
 
 - `version`: configuration schema version. Must be `"1.0"`.
-- `context.type`: project context. Use `composer` for PHP projects or `flutter` for Flutter/Dart projects.
+- `context.type`: project context. Use `composer` for PHP projects, `flutter` for Flutter/Dart projects, `python` for Python projects or `typescript` for TypeScript/JavaScript projects. `python` and `typescript` are static-only: nothing from the project is loaded.
 - `scan.include`: directories to scan inside the analyzed project.
 
 ### Optional
 
 - `context.autoload`: path to a Composer autoloader, for example `vendor/autoload.php`. Static analysis never loads it; only `inputs` and `run-guided`, which reflect on or execute project code, do. When `null` or omitted, those commands fall back to `vendor/autoload.php` if it exists.
 - `scan.exclude`: directories or files to ignore. Default: none for Composer projects; Flutter projects (`context.type: flutter`) fall back to Flutter-specific exclusions (`.dart_tool`, `.pub-cache`, `build`, ...).
-- `scan.extensions`: file extensions to parse (not language names). Default: `["php"]` for Composer projects; Flutter projects default to `["dart"]`, plus `"py"` when a `backend/app` directory exists.
+- `scan.extensions`: file extensions to parse (not language names). Default: `["php"]` for Composer projects; Flutter projects default to `["dart"]`, plus `"py"` when a `backend/app` directory exists; `python` defaults to `["py"]` and `typescript` to `["ts", "tsx", "js", "jsx"]`.
 - `architecture.layers`: named layers mapped to namespace prefixes (see below).
 - `snapshots.keep`: maximum number of labeled snapshots to keep (integer, minimum 1). Omit for unlimited.
 - `nodes.visibility`: node visibility policy, with `default` (`public` or `hidden`) and `rules` (`[{ "match": "...", "visibility": "..." }]`).
