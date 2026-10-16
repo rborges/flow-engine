@@ -151,7 +151,49 @@ final class ApplicationMapBuilder
             'integrationEdges' => $edges,
             'serviceEdges'     => array_values($serviceEdges),
             'inconsistencies'  => $inconsistencies,
+            'warnings'         => $this->serviceWarnings($services),
         ];
+    }
+
+    /**
+     * @param ServiceInfo[] $services
+     * @return array<int, array{type: string, service: string, message: string}>
+     */
+    private function serviceWarnings(array $services): array
+    {
+        $warnings = [];
+
+        foreach ($services as $service) {
+            if ($service->failedAnalysis()) {
+                $warnings[] = [
+                    'type' => 'SERVICE_FAILED',
+                    'service' => $service->name,
+                    'message' => 'analysis failed: ' . $service->error,
+                ];
+                continue;
+            }
+
+            if ($service->flow->nodeCount() > 0) {
+                continue;
+            }
+
+            $message = 'analyzed with 0 nodes';
+            if ($service->configResolution !== null) {
+                $message .= sprintf(
+                    ' (context: %s, extensions: %s)',
+                    $service->configResolution['detectedContext'] ?? 'unknown',
+                    implode(', ', $service->configResolution['extensions'] ?? []) ?: 'none'
+                );
+            }
+
+            $warnings[] = [
+                'type' => 'EMPTY_SERVICE',
+                'service' => $service->name,
+                'message' => $message . '. Check scan.include and scan.extensions in its flow-engine.json.',
+            ];
+        }
+
+        return $warnings;
     }
 
     // -------------------------------------------------------------------------

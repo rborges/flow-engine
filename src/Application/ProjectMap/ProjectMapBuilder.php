@@ -135,6 +135,10 @@ final class ProjectMapBuilder
             $warnings[] = 'Catalog contains integration inconsistencies. Review integrationPoints before trusting cross-service flow.';
         }
 
+        foreach ($appmap['warnings'] ?? [] as $warning) {
+            $warnings[] = $warning['service'] . ': ' . $warning['message'];
+        }
+
         $warnings = array_values(array_unique(array_merge($extraWarnings, $warnings, $this->capabilityWarnings($capabilities))));
 
         return new ProjectMapDTO(

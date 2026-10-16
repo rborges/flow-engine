@@ -125,4 +125,34 @@ final class ApplicationMapBuilderTest extends TestCase
         self::assertSame('failed', $map['services'][0]['status']);
         self::assertArrayNotHasKey('contract', $map['services'][0]);
     }
+
+    public function test_warns_about_empty_and_failed_services_only(): void
+    {
+        $root = sys_get_temp_dir();
+        $services = [
+            ServiceInfo::failed('orders', $root, 'LogicException: boom'),
+            new ServiceInfo('billing', $root, new Flow([], []), [], configResolution: [
+                'detectedContext' => 'python',
+                'extensions' => ['py'],
+            ]),
+            new ServiceInfo('legacy', $root, new Flow([], []), []),
+            new ServiceInfo('users', $root, new Flow([new Node('Users', 'list', $root . '/Users.php', 3, 'php')], []), []),
+        ];
+
+        $warnings = (new ApplicationMapBuilder())->build($services)['warnings'];
+
+        self::assertSame([
+            ['type' => 'SERVICE_FAILED', 'service' => 'orders', 'message' => 'analysis failed: LogicException: boom'],
+            ['type' => 'EMPTY_SERVICE', 'service' => 'billing', 'message' => 'analyzed with 0 nodes (context: python, extensions: py). Check scan.include and scan.extensions in its flow-engine.json.'],
+            ['type' => 'EMPTY_SERVICE', 'service' => 'legacy', 'message' => 'analyzed with 0 nodes. Check scan.include and scan.extensions in its flow-engine.json.'],
+        ], $warnings);
+    }
+
+    public function test_warnings_is_an_empty_list_when_every_service_has_nodes(): void
+    {
+        $root = sys_get_temp_dir();
+        $flow = new Flow([new Node('Users', 'list', $root . '/Users.php', 3, 'php')], []);
+
+        self::assertSame([], (new ApplicationMapBuilder())->build([new ServiceInfo('users', $root, $flow, [])])['warnings']);
+    }
 }
