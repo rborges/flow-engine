@@ -5,7 +5,7 @@ namespace FlowEngine\Application\CLI\Command;
 use FlowEngine\AI\Export\FlowDiagramGenerator;
 use FlowEngine\Application\AppMap\ApplicationMapBuilder;
 use FlowEngine\Application\AppMap\MermaidDiagramGenerator;
-use FlowEngine\Application\AppMap\ServiceInfo;
+use FlowEngine\Bootstrap\CatalogServiceBuilder;
 use FlowEngine\Bootstrap\Container;
 use FlowEngine\Bootstrap\InfraServices;
 use FlowEngine\Console\ConsoleIO;
@@ -126,25 +126,10 @@ final class DiagramCommand implements Command
             return;
         }
 
-        $services = [];
-        foreach ($entries as $entry) {
-            $root = realpath($entry['path']) ?: $entry['path'];
-            $name = $entry['name'] ?? basename(rtrim($root, DIRECTORY_SEPARATOR));
-
-            $container = new Container($root);
-            $container->analyzeProject()->execute();
-
-            $files = $this->scanFiles($container);
-
-            $services[] = new ServiceInfo(
-                name: $name,
-                root: $root,
-                flow: $container->getFlow(),
-                files: $files,
-                hostnames: $entry['hostnames'] ?? [],
-                contractEndpoints: $entry['contractEndpoints'] ?? [],
-            );
-        }
+        $services = (new CatalogServiceBuilder())->buildFromEntries(array_map(
+            static fn(array $entry): array => ['contractEndpoints' => $entry['contractEndpoints'] ?? []] + $entry,
+            $entries
+        ));
 
         $appmap    = (new ApplicationMapBuilder())->build($services);
         $generator = new MermaidDiagramGenerator();
@@ -200,13 +185,5 @@ final class DiagramCommand implements Command
     private function entriesFromCatalog(string $catalogPath): array
     {
         return (new InfraServices())->resolveCatalogServices()->enrichedEntries($catalogPath);
-    }
-
-    /**
-     * @return string[]
-     */
-    private function scanFiles(Container $container): array
-    {
-        return $container->projectFiles();
     }
 }

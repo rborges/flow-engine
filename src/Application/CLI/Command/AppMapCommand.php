@@ -4,8 +4,7 @@ namespace FlowEngine\Application\CLI\Command;
 
 use FlowEngine\Application\AppMap\ApplicationMapBuilder;
 use FlowEngine\Application\AppMap\OpenApiContractParser;
-use FlowEngine\Application\AppMap\ServiceInfo;
-use FlowEngine\Bootstrap\Container;
+use FlowEngine\Bootstrap\CatalogServiceBuilder;
 use FlowEngine\Bootstrap\InfraServices;
 use FlowEngine\Console\ConsoleIO;
 
@@ -50,26 +49,7 @@ final class AppMapCommand implements Command
             return;
         }
 
-        $services = [];
-
-        foreach ($entries as $entry) {
-            $root = realpath($entry['path']) ?: $entry['path'];
-            $name = $entry['name'] ?? basename(rtrim($root, DIRECTORY_SEPARATOR));
-
-            $container = new Container($root);
-            $container->analyzeProject()->execute();
-
-            $files = $this->scanFiles($container);
-
-            $services[] = new ServiceInfo(
-                name: $name,
-                root: $root,
-                flow: $container->getFlow(),
-                files: $files,
-                hostnames: $entry['hostnames'] ?? [],
-                contractEndpoints: $entry['contractEndpoints'] ?? null,
-            );
-        }
+        $services = (new CatalogServiceBuilder())->buildFromEntries($entries);
 
         $builder = new ApplicationMapBuilder();
         $map = $builder->build($services);
@@ -78,6 +58,13 @@ final class AppMapCommand implements Command
             'status' => 'ok',
             'appmap' => $map,
         ]);
+
+        // Mapa parcial: o JSON sai, mas stderr e o exit code avisam quem automatiza.
+        foreach ($services as $service) {
+            if ($service->failedAnalysis()) {
+                $this->io->error("Service {$service->name} failed analysis: {$service->error}");
+            }
+        }
     }
 
     private function extractOption(array $argv, string $prefix): ?string
@@ -94,13 +81,5 @@ final class AppMapCommand implements Command
     private function loadCatalogEntries(string $catalogPath): array
     {
         return (new InfraServices())->resolveCatalogServices()->enrichedEntries($catalogPath);
-    }
-
-    /**
-     * @return string[]
-     */
-    private function scanFiles(Container $container): array
-    {
-        return $container->projectFiles();
     }
 }

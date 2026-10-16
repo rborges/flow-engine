@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Static analysis no longer loads the analyzed project's autoloader, so a Composer platform check that requires a newer PHP no longer aborts `analyze`, `appmap` or `flow_map`. `inputs` and `run-guided` still load it.
+- Multi-service commands (`appmap`, `context`, `diagram`, the HTTP API and MCP catalog tools) isolate failures per service: a service that fails to analyze appears in `appmap.services[]` with `status: "failed"` and `error`, and the others are still mapped. Every service now carries `status`. `appmap` still prints the map but reports each failure on stderr and exits 1; `appmap-diff` and the drift/compliance HTTP endpoints (422) refuse maps with failed services instead of reporting their edges as removed; Markdown and Mermaid outputs mark the service as "analysis failed".
+- The CLI `appmap` and the HTTP API now include `configResolution` per service and derive `languages` from the scanned files, matching the MCP catalog output.
+
 ## 0.1.3 - Documentation coherence
 
 - Rewrote `docs/configuration.md` to match the real `flow-engine.json` schema (`version`, `context.type`, `scan.include/exclude/extensions`, `architecture.layers` as namespace prefixes, `snapshots.keep`) and dropped fields that were never read (`paths`, top-level `exclude`, `languages`, `architecture.rules`, `snapshots.retention`).

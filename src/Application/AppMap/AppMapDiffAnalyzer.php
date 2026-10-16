@@ -5,6 +5,26 @@ namespace FlowEngine\Application\AppMap;
 final class AppMapDiffAnalyzer
 {
     /**
+     * Serviços que falharam na análise; diff contra eles acusaria arestas removidas que não foram.
+     *
+     * @param array<string, mixed> $appmap Envelope `{appmap}` ou o mapa em si.
+     * @return string[]
+     */
+    public function failedServices(array $appmap): array
+    {
+        $map = isset($appmap['appmap']) && is_array($appmap['appmap']) ? $appmap['appmap'] : $appmap;
+
+        $failed = [];
+        foreach ($map['services'] ?? [] as $service) {
+            if (is_array($service) && ($service['status'] ?? 'ok') === 'failed') {
+                $failed[] = (string) ($service['name'] ?? '');
+            }
+        }
+
+        return $failed;
+    }
+
+    /**
      * @param array<string, mixed> $before
      * @param array<string, mixed> $after
      * @return array<string, mixed>

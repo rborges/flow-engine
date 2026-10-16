@@ -189,6 +189,45 @@ final class ReadOnlyApiTest extends TestCase
         $this->assertSame('Invalid type. Use dependency, sequence, or c4container', $response['body']['error']);
     }
 
+    public function test_appmap_isolates_failing_service_and_skips_project_autoload(): void
+    {
+        $api = new ReadOnlyApi($this->exampleProjectPath());
+        $catalog = $this->createCatalogWithTwoServices();
+        $base = dirname($catalog);
+
+        file_put_contents($base . '/svc-a/vendor/autoload.php', "<?php\nthrow new RuntimeException('autoload should not run');\n");
+        $config = json_decode((string) file_get_contents($base . '/svc-b/flow-engine.json'), true);
+        $config['context']['type'] = 'unsupported-context';
+        file_put_contents($base . '/svc-b/flow-engine.json', (string) json_encode($config));
+
+        $response = $api->handle('GET', '/api/v1/appmap', ['catalog' => $catalog]);
+
+        $this->assertSame(200, $response['status']);
+        $services = array_column($response['body']['appmap']['services'], null, 'name');
+        $this->assertSame('ok', $services['svc-a']['status']);
+        $this->assertGreaterThan(0, $services['svc-a']['stats']['nodeCount']);
+        $this->assertSame('failed', $services['svc-b']['status']);
+        $this->assertStringContainsString('unsupported-context', $services['svc-b']['error']);
+    }
+
+    public function test_appmap_drift_refuses_maps_with_failed_services(): void
+    {
+        $api = new ReadOnlyApi($this->exampleProjectPath());
+        $catalog = $this->createCatalogWithTwoServices();
+        $config = dirname($catalog) . '/svc-b/flow-engine.json';
+        $decoded = json_decode((string) file_get_contents($config), true);
+        $decoded['context']['type'] = 'unsupported-context';
+        file_put_contents($config, (string) json_encode($decoded));
+
+        $response = $api->handle('GET', '/api/v1/appmap-diff', [
+            'baselineCatalog' => $catalog,
+            'currentCatalog' => $catalog,
+        ]);
+
+        $this->assertSame(422, $response['status']);
+        $this->assertStringContainsString('svc-b', $response['body']['error']);
+    }
+
     public function test_appmap_and_diagram_endpoints_return_data(): void
     {
         $api = new ReadOnlyApi($this->exampleProjectPath());

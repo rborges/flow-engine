@@ -25,29 +25,52 @@ final class CatalogServiceBuilder
             throw new \InvalidArgumentException("Catalog file is invalid or could not be loaded: {$catalogPath}");
         }
 
-        $services = [];
-        foreach ($entries as $entry) {
-            $root = realpath($entry['path']) ?: $entry['path'];
-            $name = $entry['name'] ?? basename(rtrim($root, DIRECTORY_SEPARATOR));
+        return $this->buildFromEntries($entries, $allowReadOnlyInference);
+    }
 
+    /**
+     * @param array<int, array<string, mixed>> $entries
+     * @return array<int, ServiceInfo>
+     */
+    public function buildFromEntries(array $entries, bool $allowReadOnlyInference = false): array
+    {
+        return array_map(
+            fn(array $entry): ServiceInfo => $this->buildService($entry, $allowReadOnlyInference),
+            array_values($entries)
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     */
+    private function buildService(array $entry, bool $allowReadOnlyInference): ServiceInfo
+    {
+        $root = realpath($entry['path']) ?: $entry['path'];
+        $name = $entry['name'] ?? basename(rtrim($root, DIRECTORY_SEPARATOR));
+        $hostnames = $entry['hostnames'] ?? [];
+        $contractEndpoints = $entry['contractEndpoints'] ?? null;
+
+        // Um serviço que não analisa não pode derrubar o mapa dos demais.
+        try {
             $container = new Container($root, $allowReadOnlyInference);
             $container->analyzeProject()->execute();
             $files = $container->projectFiles();
 
-            $services[] = new ServiceInfo(
+            return new ServiceInfo(
                 name: $name,
                 root: $root,
                 flow: $container->getFlow(),
                 files: $files,
-                hostnames: $entry['hostnames'] ?? [],
-                contractEndpoints: $entry['contractEndpoints'] ?? null,
+                hostnames: $hostnames,
+                contractEndpoints: $contractEndpoints,
                 configuredScanLanguages: $this->languageSupportCatalog->supportedConfiguredLanguages($container->configuredScanExtensions()),
                 detectedLanguages: $this->languageSupportCatalog->detectFromFiles($files),
                 configResolution: $container->configResolution()->toArray(),
             );
+        } catch (\Throwable $e) {
+            // A classe distingue erro de config do projeto de bug do engine (TypeError, Error).
+            return ServiceInfo::failed($name, $root, $e::class . ': ' . $e->getMessage(), $hostnames, $contractEndpoints);
         }
-
-        return $services;
     }
 
     /**

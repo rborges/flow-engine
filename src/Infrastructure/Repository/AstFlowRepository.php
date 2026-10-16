@@ -52,8 +52,8 @@ final class AstFlowRepository implements FlowRepository
             return;
         }
 
-        $this->context->boot();
-
+        // Sem boot: análise estática não executa código do projeto (autoload, platform_check).
+        // Quem precisa de reflection ou execução chama boot() por conta própria.
         $files = $this->scanner->scan($this->context);
 
         $configPath = $this->context->rootPath() . DIRECTORY_SEPARATOR . 'flow-engine.json';

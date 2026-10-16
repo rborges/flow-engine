@@ -147,4 +147,13 @@ final class MarkdownFormatterTest extends TestCase
         $this->assertStringContainsString('## Metrics', $md);
         $this->assertStringNotContainsString('### Hotspots', $md);
     }
+
+    public function test_service_map_marks_failed_service(): void
+    {
+        $md = $this->formatter->formatServiceMap(['services' => [
+            ['name' => 'billing', 'status' => 'failed', 'error' => 'LogicException: bad | config', 'stats' => ['nodeCount' => 0, 'edgeCount' => 0]],
+        ]]);
+
+        self::assertStringContainsString('| billing | analysis failed: LogicException: bad \| config | - | - |', $md);
+    }
 }
