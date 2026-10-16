@@ -103,7 +103,8 @@ final class ApplicationMapBuilder
         // Service-level dependency graph
         $serviceEdges = [];
         foreach ($edges as $e) {
-            if (!isset($e['toService']) || $e['toService'] === null) {
+            // Asset servido por outro serviço não é dependência entre serviços.
+            if (!isset($e['toService']) || $e['toService'] === null || ($e['metadata']['kind'] ?? null) === 'asset') {
                 continue;
             }
 
@@ -186,10 +187,14 @@ final class ApplicationMapBuilder
                 );
             }
 
+            $hint = ($service->configResolution['hasConfigFile'] ?? true)
+                ? 'Check scan.include and scan.extensions in its flow-engine.json.'
+                : 'No flow-engine.json was found; run init on the service to configure its scan.';
+
             $warnings[] = [
                 'type' => 'EMPTY_SERVICE',
                 'service' => $service->name,
-                'message' => $message . '. Check scan.include and scan.extensions in its flow-engine.json.',
+                'message' => $message . '. ' . $hint,
             ];
         }
 

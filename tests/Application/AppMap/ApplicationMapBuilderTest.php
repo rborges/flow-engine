@@ -136,6 +136,11 @@ final class ApplicationMapBuilderTest extends TestCase
                 'extensions' => ['py'],
             ]),
             new ServiceInfo('legacy', $root, new Flow([], []), []),
+            new ServiceInfo('inferred', $root, new Flow([], []), [], configResolution: [
+                'hasConfigFile' => false,
+                'detectedContext' => 'generic',
+                'extensions' => [],
+            ]),
             new ServiceInfo('users', $root, new Flow([new Node('Users', 'list', $root . '/Users.php', 3, 'php')], []), []),
         ];
 
@@ -145,6 +150,7 @@ final class ApplicationMapBuilderTest extends TestCase
             ['type' => 'SERVICE_FAILED', 'service' => 'orders', 'message' => 'analysis failed: LogicException: boom'],
             ['type' => 'EMPTY_SERVICE', 'service' => 'billing', 'message' => 'analyzed with 0 nodes (context: python, extensions: py). Check scan.include and scan.extensions in its flow-engine.json.'],
             ['type' => 'EMPTY_SERVICE', 'service' => 'legacy', 'message' => 'analyzed with 0 nodes. Check scan.include and scan.extensions in its flow-engine.json.'],
+            ['type' => 'EMPTY_SERVICE', 'service' => 'inferred', 'message' => 'analyzed with 0 nodes (context: generic, extensions: none). No flow-engine.json was found; run init on the service to configure its scan.'],
         ], $warnings);
     }
 
@@ -154,5 +160,25 @@ final class ApplicationMapBuilderTest extends TestCase
         $flow = new Flow([new Node('Users', 'list', $root . '/Users.php', 3, 'php')], []);
 
         self::assertSame([], (new ApplicationMapBuilder())->build([new ServiceInfo('users', $root, $flow, [])])['warnings']);
+    }
+
+    public function test_asset_edges_stay_in_integration_edges_but_not_in_service_edges(): void
+    {
+        $base = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow-engine-appmap-asset-' . uniqid();
+        mkdir($base . DIRECTORY_SEPARATOR . 'web', 0777, true);
+        mkdir($base . DIRECTORY_SEPARATOR . 'cdn', 0777, true);
+        $file = $base . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . 'Page.php';
+        file_put_contents($file, "<?php\nclass Page {\n  public function render() {\n    return 'http://static-files/app.css' . 'http://static-files/health';\n  }\n}\n");
+
+        $web = new ServiceInfo('web', dirname($file), new Flow([new Node('Page', 'render', $file, 3, 'php')], []), [$file]);
+        $cdn = new ServiceInfo('cdn', $base . DIRECTORY_SEPARATOR . 'cdn', new Flow([], []), [], ['static-files']);
+
+        $map = (new ApplicationMapBuilder())->build([$web, $cdn]);
+
+        self::assertSame(
+            ['asset', 'http'],
+            array_map(fn(array $e) => $e['metadata']['kind'], $map['integrationEdges'])
+        );
+        self::assertSame([['from' => 'web', 'to' => 'cdn', 'type' => 'http', 'count' => 1]], $map['serviceEdges']);
     }
 }

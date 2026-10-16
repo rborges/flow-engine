@@ -82,4 +82,48 @@ DART
         self::assertSame('localhost', $http[0]->metadata['host']);
         self::assertSame('/v1/users/me', $http[0]->metadata['path']);
     }
+
+    public function test_only_real_calls_survive_license_header_and_docblocks(): void
+    {
+        $base = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow-engine-detector-noise-' . uniqid();
+        mkdir($base, 0777, true);
+        $file = $base . DIRECTORY_SEPARATOR . 'Client.php';
+        file_put_contents($file, <<<'PHP'
+<?php
+/**
+ * Licensed under the GPL: https://www.gnu.org/licenses/gpl-3.0.html
+ */
+class Client
+{
+    /**
+     * @see https://docs.example.com/orders
+     */
+    public function orders()
+    {
+        // fallback: https://legacy.example.com
+        return file_get_contents('https://api.example.com/orders');
+    }
+
+    public function logo()
+    {
+        return '<img src="https://static.example.com/logo.png">';
+    }
+}
+PHP);
+
+        $flow = new Flow([
+            new Node('Client', 'orders', $file, 10, 'php'),
+            new Node('Client', 'logo', $file, 16, 'php'),
+        ], []);
+
+        $http = array_values(array_filter(
+            (new IntegrationDetector())->detect($flow, $base, [$file]),
+            fn($c) => $c->type === 'http'
+        ));
+
+        self::assertSame(
+            [['https://api.example.com/orders', 13, 'http'], ['https://static.example.com/logo.png', 18, 'asset']],
+            array_map(fn($c) => [$c->target, $c->fromLine, $c->metadata['kind']], $http)
+        );
+    }
 }
