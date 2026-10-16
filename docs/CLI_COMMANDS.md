@@ -77,7 +77,7 @@ local safety step from graph analysis so `refactor-execute` and
 - `appmap <service-a> <service-b> ...`: build an application map across multiple project paths.
 - `appmap --catalog=flow-services.json`: build the application map from a service catalog.
 
-See [System diagrams](system-diagrams.md) for diagram views, multi-project maps, and catalog usage.
+See [System diagrams](system-diagrams.md) for diagram views, multi-project maps, and catalog usage, and [Application map output](appmap.md) for the `appmap` JSON contract.
 
 ## Snapshots And Gates
 
