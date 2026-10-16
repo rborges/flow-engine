@@ -59,6 +59,11 @@ final class CommentScanner
                 continue;
             }
 
+            if (($this->syntax['regex'] ?? false) && $char === '/' && $this->regexCanStart()) {
+                $this->regex();
+                continue;
+            }
+
             if (($this->syntax['block'] ?? false) && $this->at('/*')) {
                 $close = strpos($this->src, '*/', $this->i + 2);
                 $this->skip($close === false ? $this->length : $close + 2);
@@ -126,6 +131,56 @@ final class CommentScanner
         }
     }
 
+    /**
+     * `/` abre regex literal quando não pode ser divisão nem comentário: depois de operador, abertura ou início.
+     */
+    private function regexCanStart(): bool
+    {
+        $next = $this->src[$this->i + 1] ?? '';
+        if ($next === '/' || $next === '*' || $next === '' || $next === "\n" || $next === "\r") {
+            return false;
+        }
+
+        $before = rtrim($this->out);
+        if ($before === '') {
+            return true;
+        }
+
+        if (preg_match('/\b(return|typeof|case|in|of|delete|void|throw|new|yield|await)$/', $before) === 1) {
+            return true;
+        }
+
+        return str_contains('(,=:[!&|?{};+-*%<>~^', $before[strlen($before) - 1]);
+    }
+
+    /**
+     * Copia a regex até a `/` final, fora de classe `[...]`; sem fechamento na linha, só a `/` vira código.
+     */
+    private function regex(): void
+    {
+        $inClass = false;
+        for ($j = $this->i + 1; $j < $this->length; $j++) {
+            $char = $this->src[$j];
+            if ($char === "\n" || $char === "\r") {
+                break;
+            }
+            if ($char === '\\') {
+                $j++;
+                continue;
+            }
+            if ($char === '[') {
+                $inClass = true;
+            } elseif ($char === ']') {
+                $inClass = false;
+            } elseif ($char === '/' && !$inClass) {
+                $this->emit($j - $this->i + 1);
+                return;
+            }
+        }
+
+        $this->emit(1);
+    }
+
     private function at(string $token): bool
     {
         return substr_compare($this->src, $token, $this->i, strlen($token)) === 0;
@@ -148,11 +203,19 @@ final class CommentScanner
         return $this->i > 0 && preg_match('/\w/', $this->src[$this->i - 1]) === 1;
     }
 
+    /**
+     * Docstring abre a linha logo após um cabeçalho `def`/`class` (termina em `:`) ou no início do módulo.
+     */
     private function startsLine(): bool
     {
         $lineStart = strrpos($this->out, "\n");
         $prefix = $lineStart === false ? $this->out : substr($this->out, $lineStart + 1);
+        if (trim($prefix) !== '') {
+            return false;
+        }
 
-        return trim($prefix) === '';
+        $before = rtrim($this->out);
+
+        return $before === '' || str_ends_with($before, ':');
     }
 }

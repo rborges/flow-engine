@@ -9,10 +9,19 @@ final class CommentStripper
 {
     /**
      * line: marcador de comentário de linha; block: delimitadores de bloco; quotes: delimitadores de string;
-     * triple: aceita '''/"""; raw: prefixo r desliga escapes; interpolation: aspas em que `${...}` é código.
+     * triple: aceita '''/"""; raw: prefixo r desliga escapes; rawQuotes: aspas sem escape;
+     * interpolation: aspas em que `${...}` é código; docstring: string tripla que abre a linha é comentário.
      */
+    private const JS = ['line' => '//', 'block' => true, 'quotes' => ["'", '"', '`'], 'interpolation' => ['`'], 'regex' => true];
+
     private const SYNTAX = [
         'dart' => ['line' => '//', 'block' => true, 'quotes' => ["'", '"'], 'triple' => true, 'raw' => true, 'interpolation' => ["'", '"']],
+        'py' => ['line' => '#', 'block' => false, 'quotes' => ["'", '"'], 'triple' => true, 'docstring' => true],
+        'go' => ['line' => '//', 'block' => true, 'quotes' => ["'", '"', '`'], 'rawQuotes' => ['`']],
+        'ts' => self::JS,
+        'tsx' => self::JS,
+        'js' => self::JS,
+        'jsx' => self::JS,
     ];
 
     public function strip(string $content, string $extension): string

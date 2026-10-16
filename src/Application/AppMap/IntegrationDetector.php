@@ -2,6 +2,7 @@
 
 namespace FlowEngine\Application\AppMap;
 
+use FlowEngine\Bootstrap\LanguageSupportCatalog;
 use FlowEngine\Domain\Contracts\Flow;
 
 final class IntegrationDetector
@@ -10,11 +11,18 @@ final class IntegrationDetector
     private CommentStripper $commentStripper;
     private UrlClassifier $urlClassifier;
 
-    public function __construct(?NodeLocator $locator = null)
+    /** @var string[] */
+    private array $sourceExtensions = [];
+
+    public function __construct(?NodeLocator $locator = null, ?LanguageSupportCatalog $languageCatalog = null)
     {
         $this->locator = $locator ?? new NodeLocator();
         $this->commentStripper = new CommentStripper();
         $this->urlClassifier = new UrlClassifier();
+
+        foreach (($languageCatalog ?? new LanguageSupportCatalog())->entries() as $entry) {
+            array_push($this->sourceExtensions, ...$entry['extensions']);
+        }
     }
 
     /**
@@ -29,7 +37,7 @@ final class IntegrationDetector
 
         foreach ($files as $file) {
             $extension = strtolower((string) pathinfo($file, PATHINFO_EXTENSION));
-            if (!in_array($extension, ['php', 'dart'], true)) {
+            if (!in_array($extension, $this->sourceExtensions, true)) {
                 continue;
             }
 
