@@ -172,7 +172,9 @@ final class FlowSnapshotSerializer implements FlowSnapshotExporterPort
                 || (isset($node['metadata']) && !is_array($node['metadata']))
                 || !in_array($node['visibility'], [NodeVisibility::PUBLIC, NodeVisibility::HIDDEN], true)
                 || $node['isPublic'] !== ($node['visibility'] === NodeVisibility::PUBLIC)
-                || $node['id'] !== $this->expectedNodeId($node['language'], $node['class'], $node['method'])
+                || (isset($node['type']) && !in_array($node['type'], [Node::TYPE_METHOD, Node::TYPE_FUNCTION, Node::TYPE_FILE], true))
+                || (isset($node['qualifier']) && !is_string($node['qualifier']))
+                || $node['id'] !== $this->expectedNodeId($node)
                 || isset($nodeIds[$node['id']])
             ) {
                 throw new \RuntimeException('Invalid flow cache node structure');
@@ -210,10 +212,18 @@ final class FlowSnapshotSerializer implements FlowSnapshotExporterPort
         return true;
     }
 
-    private function expectedNodeId(string $language, string $class, string $method): string
+    /** @param array<string, mixed> $node */
+    private function expectedNodeId(array $node): string
     {
-        $base = $class . '::' . $method;
-
-        return $language === 'php' ? $base : $language . ':' . $base;
+        return (new Node(
+            $node['class'],
+            $node['method'],
+            $node['file'],
+            $node['line'],
+            $node['language'],
+            null,
+            $node['type'] ?? Node::TYPE_METHOD,
+            $node['qualifier'] ?? null
+        ))->id();
     }
 }

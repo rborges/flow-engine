@@ -44,6 +44,27 @@ final class FlowCacheTest extends TestCase
         self::assertNull($this->cache->loadValidFlow([$this->source], $config, 'parser-b'));
     }
 
+    public function test_procedural_nodes_and_analysis_warnings_survive_the_cache(): void
+    {
+        $config = $this->temporaryDirectory . '/flow-engine.json';
+        $flow = new Flow([
+            new Node('', 'helper', $this->source, 3, 'php', null, Node::TYPE_FUNCTION),
+            new Node('src/App.php', '__file', $this->source, null, 'php', null, Node::TYPE_FILE),
+            new Node('App', 'run', $this->source, 5, 'php', null, Node::TYPE_METHOD, 'src/App.php'),
+            new Node('main', 'Poll', $this->source, 7, 'go', null, Node::TYPE_METHOD, '~path~.src'),
+        ], []);
+
+        $this->cache->saveFlow($flow, [$this->source], $config, [], 'parser-a', null, null, ['aviso']);
+        $loaded = $this->cache->loadValidFlow([$this->source], $config, 'parser-a');
+
+        self::assertNotNull($loaded, implode("\n", $this->cache->warnings()));
+        self::assertSame(['aviso'], $loaded['analysisWarnings']);
+        self::assertSame(
+            array_map(fn(Node $n) => $n->id(), $flow->nodes()),
+            array_map(fn(Node $n) => $n->id(), $loaded['flow']->nodes()),
+        );
+    }
+
     public function test_input_metadata_check_does_not_deserialize_the_graph(): void
     {
         $config = $this->temporaryDirectory . '/flow-engine.json';

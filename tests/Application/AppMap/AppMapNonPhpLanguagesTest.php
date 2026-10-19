@@ -86,7 +86,7 @@ GO);
             'legacy-js' => [['https://svc-b/api/ping', 'svc-b', 'javascript:src.client::ping']],
             'orders' => [['https://svc-b/api/orders', 'svc-b', 'python:src.client::sync_orders']],
             'web' => [['https://svc-b/api/web', 'svc-b', 'typescript:src.api.Api::load']],
-            'worker' => [['https://svc-b/api/poll', 'svc-b', 'go:main::Poll']],
+            'worker' => [['https://svc-b/api/poll', 'svc-b', 'go:~path~.src@main::Poll']],
         ], $edges);
         self::assertCount(4, $map['serviceEdges']);
     }
