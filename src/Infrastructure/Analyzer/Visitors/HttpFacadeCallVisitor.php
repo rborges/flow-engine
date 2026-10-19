@@ -38,7 +38,7 @@ final class HttpFacadeCallVisitor implements NodeVisitor
 
     public function enter(Node $node, VisitorContext $context): void
     {
-        if (! $context->isInsideMethod()) {
+        if ($context->currentNodeId() === null) {
             return;
         }
 

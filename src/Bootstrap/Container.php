@@ -251,8 +251,10 @@ final class Container
         $warnings = array_merge(
             $this->flowRepository->scanWarnings(),
             $this->flowRepository->cacheWarnings(),
+            $this->flowRepository->analysisWarnings(),
         );
         $duplicates = $this->flowRepository->duplicateIds();
+
         if ($duplicates === []) {
             return $warnings;
         }
@@ -262,8 +264,12 @@ final class Container
             ? sprintf(' and %d more', count($duplicates) - 5)
             : '';
 
+        // Sobra aqui apenas duplicata DENTRO do mesmo arquivo (ex.: sobrecargas de
+        // assinatura em TypeScript). Homônimos em arquivos diferentes já foram
+        // separados pelo desambiguador. Mantém-se a última ocorrência — que é o
+        // corpo real, e não a assinatura.
         $warnings[] = sprintf(
-            'Parser produced %d duplicate node IDs; deduplicated (kept last occurrence). Examples: %s%s.',
+            'Parser produced %d duplicate node IDs within the same file; deduplicated (kept last occurrence). Examples: %s%s.',
             count($duplicates),
             implode(', ', $sample),
             $suffix

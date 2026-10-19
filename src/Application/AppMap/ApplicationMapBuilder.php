@@ -103,7 +103,8 @@ final class ApplicationMapBuilder
         // Service-level dependency graph
         $serviceEdges = [];
         foreach ($edges as $e) {
-            if (!isset($e['toService']) || $e['toService'] === null) {
+            // Asset servido por outro serviço não é dependência entre serviços.
+            if (!isset($e['toService']) || $e['toService'] === null || ($e['metadata']['kind'] ?? null) === 'asset') {
                 continue;
             }
 
@@ -134,7 +135,8 @@ final class ApplicationMapBuilder
             }
             $arr['endpoints'] = $codeEndpoints;
 
-            if ($s->contractEndpoints !== null) {
+            // Serviço sem análise não tem endpoints de código: comparar com o contrato só gera falso positivo.
+            if ($s->contractEndpoints !== null && !$s->failedAnalysis()) {
                 $arr['contract'] = ['endpointCount' => count($s->contractEndpoints)];
                 foreach ($this->checkContractConsistency($codeEndpoints, $s->contractEndpoints, $s->name) as $issue) {
                     $inconsistencies[] = $issue;
@@ -150,7 +152,53 @@ final class ApplicationMapBuilder
             'integrationEdges' => $edges,
             'serviceEdges'     => array_values($serviceEdges),
             'inconsistencies'  => $inconsistencies,
+            'warnings'         => $this->serviceWarnings($services),
         ];
+    }
+
+    /**
+     * @param ServiceInfo[] $services
+     * @return array<int, array{type: string, service: string, message: string}>
+     */
+    private function serviceWarnings(array $services): array
+    {
+        $warnings = [];
+
+        foreach ($services as $service) {
+            if ($service->failedAnalysis()) {
+                $warnings[] = [
+                    'type' => 'SERVICE_FAILED',
+                    'service' => $service->name,
+                    'message' => 'analysis failed: ' . $service->error,
+                ];
+                continue;
+            }
+
+            if ($service->flow->nodeCount() > 0) {
+                continue;
+            }
+
+            $message = 'analyzed with 0 nodes';
+            if ($service->configResolution !== null) {
+                $message .= sprintf(
+                    ' (context: %s, extensions: %s)',
+                    $service->configResolution['detectedContext'] ?? 'unknown',
+                    implode(', ', $service->configResolution['extensions'] ?? []) ?: 'none'
+                );
+            }
+
+            $hint = ($service->configResolution['hasConfigFile'] ?? true)
+                ? 'Check scan.include and scan.extensions in its flow-engine.json.'
+                : 'No flow-engine.json was found; run init on the service to configure its scan.';
+
+            $warnings[] = [
+                'type' => 'EMPTY_SERVICE',
+                'service' => $service->name,
+                'message' => $message . '. ' . $hint,
+            ];
+        }
+
+        return $warnings;
     }
 
     // -------------------------------------------------------------------------

@@ -22,4 +22,5 @@ Start with the [project README](../README.md) for the short overview. Use this p
 - [Analysis tools](analysis-tools.md): metrics, cycles, architecture checks, orphans, impact, risk, and reports.
 - [Flow tracing](flow-tracing.md): follow dependencies upstream and downstream from a node.
 - [System diagrams](system-diagrams.md): generate Mermaid diagrams and application maps.
+- [Application map output](appmap.md): the `appmap` JSON contract and its schema.
 - [Concepts](concepts.md): glossary for graph terms used by Flow Engine.

@@ -12,6 +12,7 @@ interface NodeFactory
         string $file,
         ?int $line,
         string $language = 'php',
-        ?array $metadata = null
+        ?array $metadata = null,
+        string $type = Node::TYPE_METHOD
     ): Node;
 }

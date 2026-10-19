@@ -40,14 +40,19 @@ final class DefaultNodeFactory implements NodeFactory
         string $file,
         ?int $line,
         string $language = 'php',
-        ?array $metadata = null
+        ?array $metadata = null,
+        string $type = Node::TYPE_METHOD
     ): Node {
-        $this->validateClass($class);
+        // Funções globais não têm classe; para os demais tipos ela é obrigatória.
+        if ($type !== Node::TYPE_FUNCTION) {
+            $this->validateClass($class);
+        }
+
         $this->validateMethod($method);
         $this->validateFile($file);
         $this->validateLine($line);
 
-        return new Node($class, $method, $file, $line, $language, $metadata);
+        return new Node($class, $method, $file, $line, $language, $metadata, $type);
     }
 
     /**

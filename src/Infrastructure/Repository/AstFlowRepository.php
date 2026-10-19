@@ -16,6 +16,9 @@ use FlowEngine\Infrastructure\Analyzer\ScanDiagnosticsProvider;
 use FlowEngine\Infrastructure\Analyzer\FileParser;
 use FlowEngine\Infrastructure\Analyzer\FlowBuilder;
 use FlowEngine\Infrastructure\Analyzer\CrossLanguageEdgeDetector;
+use FlowEngine\Infrastructure\Analyzer\NodeIdDisambiguator;
+use FlowEngine\Infrastructure\Analyzer\SourceFileGuard;
+use FlowEngine\Infrastructure\Analyzer\ProjectRelativePath;
 use FlowEngine\Infrastructure\Cache\FlowCache;
 use FlowEngine\Infrastructure\Cache\PerFileCache;
 use FlowEngine\Infrastructure\Cache\AnalysisSignature;
@@ -31,6 +34,9 @@ final class AstFlowRepository implements FlowRepository
 
     /** @var string[] */
     private array $scanWarnings = [];
+
+    /** @var string[] Avisos estruturais: arquivos ignorados, colisões de ID, chamadas ambíguas. */
+    private array $analysisWarnings = [];
 
     public function __construct(
         private ProjectScanner $scanner,
@@ -53,8 +59,8 @@ final class AstFlowRepository implements FlowRepository
             return;
         }
 
-        $this->context->boot();
-
+        // Sem boot: análise estática não executa código do projeto (autoload, platform_check).
+        // Quem precisa de reflection ou execução chama boot() por conta própria.
         $files = $this->scanner->scan($this->context);
         $this->scanWarnings = $this->scanner instanceof ScanDiagnosticsProvider
             ? $this->scanner->scanWarnings()
@@ -71,16 +77,33 @@ final class AstFlowRepository implements FlowRepository
             $this->flow = $cachedFlow['flow'];
             $this->cacheHash = $cachedFlow['hash'];
             $this->duplicateIds = $cachedFlow['duplicateIds'];
+            $this->analysisWarnings = $cachedFlow['analysisWarnings'];
             return;
         }
 
+        // Ordem estável: sem isso, qual declaração homônima sobrevive depende da ordem
+        // de iteração do sistema de arquivos, e o grafo varia entre máquinas.
+        sort($files);
+
         $cached = $this->perFileCache?->load() ?? [];
         $newMap  = [];
-        $nodes   = [];
-        $edges   = [];
+        $nodesByFile = [];
+        $edgesByFile = [];
         $symbols = [];
+        $guard = new SourceFileGuard();
+        $skipped = [];
 
         foreach ($files as $file) {
+            // Bundles minificados não têm valor analítico e estouram a memória do
+            // parser. Melhor pular e dizer que pulou do que morrer com fatal error.
+            $skipReason = $guard->skipReason($file);
+
+            if ($skipReason !== null) {
+                $skipped[] = ProjectRelativePath::for($file, $this->context->rootPath())
+                    . ' (' . $skipReason . ')';
+                continue;
+            }
+
             $fp = $file . '|' . $sourceFingerprints[$file] . '|parser:' . $parserSignature;
 
             if (isset($cached[$file]) && $cached[$file]['fp'] === $fp) {
@@ -94,6 +117,7 @@ final class AstFlowRepository implements FlowRepository
                     'line'   => $n->line(),
                     'lang'   => $n->language(),
                     'meta'   => $n->metadata(),
+                    'type'   => $n->type(),
                 ], $ast['nodes'] ?? []);
                 $rawEdges = array_map(fn(Edge $e) => [
                     'from'   => $e->from(),
@@ -107,11 +131,22 @@ final class AstFlowRepository implements FlowRepository
 
             $newMap[$file] = $entry;
 
+            $nodesByFile[$file] = [];
+            $edgesByFile[$file] = [];
+
             foreach ($entry['nodes'] as $nd) {
-                $nodes[] = new Node($nd['class'], $nd['method'], $nd['file'], $nd['line'], $nd['lang'], $nd['meta'] ?? null);
+                $nodesByFile[$file][] = new Node(
+                    $nd['class'],
+                    $nd['method'],
+                    $nd['file'],
+                    $nd['line'],
+                    $nd['lang'],
+                    $nd['meta'] ?? null,
+                    $nd['type'] ?? Node::TYPE_METHOD
+                );
             }
             foreach ($entry['edges'] as $ed) {
-                $edges[] = new Edge($ed['from'], $ed['to'], $ed['method'], $ed['type']);
+                $edgesByFile[$file][] = new Edge($ed['from'], $ed['to'], $ed['method'], $ed['type']);
             }
             foreach ($entry['symbols'] ?? [] as $sd) {
                 $symbols[] = new SymbolDTO(
@@ -124,6 +159,23 @@ final class AstFlowRepository implements FlowRepository
                 );
             }
         }
+
+        // Símbolos globais homônimos em arquivos diferentes precisam ser separados
+        // ANTES do build; senão o FlowBuilder funde os dois num nó só.
+        $disambiguated = (new NodeIdDisambiguator())->apply(
+            $nodesByFile,
+            $edgesByFile,
+            $this->context->rootPath()
+        );
+
+        $nodes = $disambiguated['nodes'];
+        $edges = $disambiguated['edges'];
+        $analysisWarnings = array_merge(
+            $this->skippedFilesWarning($skipped),
+            $disambiguated['warnings']
+        );
+
+        $nodes = $this->materializeIncludedFiles($nodes, $edges, $files);
 
         if ($this->crossLanguageDetector !== null) {
             $edges = $this->crossLanguageDetector->detect($nodes, $edges);
@@ -145,13 +197,102 @@ final class AstFlowRepository implements FlowRepository
                 $parserSignature,
                 $sourceFingerprints,
                 $configFingerprint,
+                $analysisWarnings,
             );
         }
 
         $this->assertSourceStateUnchanged($sourceFingerprints, $configPath, $configFingerprint);
         $this->flow = $flow;
         $this->duplicateIds = $duplicateIds;
+        $this->analysisWarnings = $analysisWarnings;
         $this->cacheHash = $cacheHash ?? null;
+    }
+
+    /**
+     * Warnings estruturais: arquivos ignorados, símbolos homônimos, chamadas ambíguas.
+     *
+     * @api
+     * @return string[]
+     */
+    public function analysisWarnings(): array
+    {
+        return $this->analysisWarnings;
+    }
+
+    /**
+     * @param string[] $skipped
+     * @return string[]
+     */
+    private function skippedFilesWarning(array $skipped): array
+    {
+        if ($skipped === []) {
+            return [];
+        }
+
+        $sample = array_slice($skipped, 0, 5);
+        $more = count($skipped) > 5 ? sprintf(' and %d more', count($skipped) - 5) : '';
+
+        return [sprintf(
+            '%d files were skipped as generated or minified and are absent from the graph: %s%s.',
+            count($skipped),
+            implode(', ', $sample),
+            $more
+        )];
+    }
+
+    /**
+     * Cria o nó-arquivo dos alvos de include que ainda não têm um.
+     *
+     * O parser só emite nó-arquivo para scripts (código executável de topo), mas
+     * `require 'classes/AuthModel.php'` aponta para um arquivo de declaração pura.
+     * Sem este passo a aresta apontaria para o vazio — e a dependência real de um
+     * script sobre o arquivo que ele carrega se perderia.
+     *
+     * Só materializa arquivos que estão no escopo do scan: includes de vendor ou
+     * de fora do projeto continuam sem nó, e o FlowBuilder descarta suas arestas.
+     *
+     * @param Node[]   $nodes
+     * @param Edge[]   $edges
+     * @param string[] $files Arquivos escaneados (caminhos absolutos)
+     * @return Node[]
+     */
+    private function materializeIncludedFiles(array $nodes, array $edges, array $files): array
+    {
+        $existing = [];
+        foreach ($nodes as $node) {
+            $existing[$node->id()] = true;
+        }
+
+        $root = $this->context->rootPath();
+        $scanned = [];
+        foreach ($files as $file) {
+            $scanned['file:' . ProjectRelativePath::for($file, $root)] = $file;
+        }
+
+        $created = [];
+        foreach ($edges as $edge) {
+            if ($edge->type() !== 'include') {
+                continue;
+            }
+
+            $target = $edge->to();
+
+            if (isset($existing[$target]) || isset($created[$target]) || !isset($scanned[$target])) {
+                continue;
+            }
+
+            $created[$target] = new Node(
+                substr($target, strlen('file:')),
+                '__file',
+                $scanned[$target],
+                null,
+                'php',
+                null,
+                Node::TYPE_FILE
+            );
+        }
+
+        return array_merge($nodes, array_values($created));
     }
 
     private function parserSignature(): string

@@ -12,10 +12,11 @@ namespace FlowEngine\Domain\Flow;
  * - property_access: Acesso a propriedade ($this->property)
  * - static_call: Chamada estática (Class::method())
  * - static_property: Propriedade estática (Class::$property)
- * - trait_usage: Uso de trait (use TraitName)
- * - interface_implementation: Implementação de interface (implements InterfaceName)
- * 
- * VERSÃO: 2.2 (trait & interface support)
+ * - function_call: Chamada de função livre (helper())
+ * - include: Inclusão de arquivo (require 'x.php')
+ * - direct_instantiation: Instanciação direta (new Class())
+ * - inherits / trait_usage / interface_implementation: relações estruturais
+ * - http_call, model_relationship: relações de framework
  */
 final class Edge
 {

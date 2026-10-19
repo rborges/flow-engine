@@ -4,6 +4,9 @@ namespace Tests\Infrastructure\Config;
 
 use FlowEngine\Infrastructure\Config\JsonProjectConfig;
 use FlowEngine\Infrastructure\Config\SchemaValidator;
+use FlowEngine\Infrastructure\Context\DefaultProjectContextFactory;
+use FlowEngine\Infrastructure\Context\StaticProjectContext;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -93,5 +96,37 @@ final class JsonProjectConfigTest extends TestCase
         $this->expectException(\RuntimeException::class);
 
         new JsonProjectConfig($this->tmpDir, $this->validator());
+    }
+
+    /**
+     * @return array<string, array{string, string[]}>
+     */
+    public static function staticTypes(): array
+    {
+        return [
+            'python' => ['python', ['py']],
+            'typescript' => ['typescript', ['ts', 'tsx', 'js', 'jsx']],
+        ];
+    }
+
+    /**
+     * @param string[] $extensions
+     */
+    #[DataProvider('staticTypes')]
+    public function test_tipos_estaticos_tem_extensoes_default_e_contexto_sem_boot(string $type, array $extensions): void
+    {
+        file_put_contents($this->tmpDir . '/flow-engine.json', (string) json_encode([
+            'version' => '1.0',
+            'context' => ['type' => $type],
+            'scan' => ['include' => ['src']],
+        ]));
+
+        $config = new JsonProjectConfig($this->tmpDir, $this->validator());
+        $context = (new DefaultProjectContextFactory())->create($config);
+
+        $this->assertSame($extensions, $config->scanExtensions());
+        $this->assertInstanceOf(StaticProjectContext::class, $context);
+        $this->assertSame($extensions, $context->extensions());
+        $context->boot();
     }
 }

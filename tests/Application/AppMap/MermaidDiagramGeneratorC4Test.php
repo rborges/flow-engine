@@ -190,4 +190,15 @@ final class MermaidDiagramGeneratorC4Test extends TestCase
             'generatedAt'      => '2026-02-19T00:00:00+00:00',
         ];
     }
+
+    public function test_failed_service_is_marked_in_diagrams(): void
+    {
+        $appmap = $this->buildAppmap(
+            services: [['name' => 'billing', 'status' => 'failed', 'languages' => [], 'stats' => ['nodeCount' => 0], 'endpoints' => []]],
+        );
+
+        $this->assertStringContainsString('analysis failed', $this->generator->c4Container($appmap));
+        $this->assertStringContainsString('analysis failed', $this->generator->dependencyGraph($appmap));
+        $this->assertStringNotContainsString('0 nodes', $this->generator->c4Container($appmap));
+    }
 }

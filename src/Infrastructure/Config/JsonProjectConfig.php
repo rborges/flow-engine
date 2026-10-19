@@ -80,7 +80,11 @@ final class JsonProjectConfig implements ProjectConfig
             return $this->defaultFlutterExtensions();
         }
 
-        return ['php'];
+        return match ($this->contextType()) {
+            'python' => ['py'],
+            'typescript' => ['ts', 'tsx', 'js', 'jsx'],
+            default => ['php'],
+        };
     }
 
     public function contextType(): string

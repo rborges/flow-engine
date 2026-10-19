@@ -40,6 +40,14 @@ final class MethodVisitor implements NodeVisitor
         $methodName = $node->name->toString();
         $metadata = $this->extractSignature($node);
 
+        // Sem namespace (PHP legado) a classe não diz nada sobre onde ela vive, e a
+        // "área" do nó acabaria sendo o próprio nome da classe. O diretório é a única
+        // estrutura que esse código tem — registre-o. Código com namespace não recebe
+        // esta chave, então seu grafo permanece idêntico.
+        if ($context->currentNamespace() === null) {
+            $metadata['relPath'] = $context->relativeFile();
+        }
+
         // Mark nodes that belong to interface declarations so the orphan detector can suppress them.
         if ($context->currentClassIsInterface()) {
             $metadata['isInterface'] = true;

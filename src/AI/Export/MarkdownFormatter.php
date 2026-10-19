@@ -163,6 +163,11 @@ final class MarkdownFormatter
             $langs = implode(', ', $svc['languages'] ?? []);
             $nodes = $svc['stats']['nodeCount'] ?? 0;
             $edges = $svc['stats']['edgeCount'] ?? 0;
+            if (($svc['status'] ?? 'ok') === 'failed') {
+                $error = str_replace(['|', "\n"], ['\\|', ' '], (string) ($svc['error'] ?? ''));
+                $md .= "| {$name} | analysis failed: {$error} | - | - |\n";
+                continue;
+            }
             $md .= "| {$name} | {$langs} | {$nodes} | {$edges} |\n";
         }
 

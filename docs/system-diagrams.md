@@ -29,6 +29,8 @@ php bin/engine.php appmap --catalog=flow-services.json
 php bin/engine.php diagram --catalog=flow-services.json --type=c4container
 ```
 
+The JSON produced by `appmap` is described in [Application map output](appmap.md).
+
 A catalog is optional. Use it when several repositories should be analyzed as one system.
 It points Flow Engine at service paths and metadata instead of passing every service path
 on the command line.

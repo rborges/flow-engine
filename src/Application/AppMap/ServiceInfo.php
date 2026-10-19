@@ -3,6 +3,7 @@
 namespace FlowEngine\Application\AppMap;
 
 use FlowEngine\Domain\Contracts\Flow;
+use FlowEngine\Domain\Flow\Flow as DomainFlow;
 
 final readonly class ServiceInfo
 {
@@ -23,9 +24,32 @@ final readonly class ServiceInfo
         public array $configuredScanLanguages = [],
         public array $detectedLanguages = [],
         public ?array $configResolution = null,
+        public ?string $error = null,
         public array $analysisWarnings = [],
         public ?array $staleness = null,
     ) {
+    }
+
+    /**
+     * @param string[] $hostnames
+     * @param array<int, array{method: string, path: string, summary: string}>|null $contractEndpoints
+     */
+    public static function failed(string $name, string $root, string $error, array $hostnames = [], ?array $contractEndpoints = null): self
+    {
+        return new self(
+            name: $name,
+            root: $root,
+            flow: new DomainFlow([], []),
+            files: [],
+            hostnames: $hostnames,
+            contractEndpoints: $contractEndpoints,
+            error: $error,
+        );
+    }
+
+    public function failedAnalysis(): bool
+    {
+        return $this->error !== null;
     }
 
     /**
@@ -73,12 +97,17 @@ final readonly class ServiceInfo
             'domain' => basename(rtrim($this->root, DIRECTORY_SEPARATOR)),
             'kind' => 'service',
             'external' => false,
+            'status' => $this->failedAnalysis() ? 'failed' : 'ok',
             'hostnames' => $this->hostnames,
             'stats' => [
                 'nodeCount' => $this->flow->nodeCount(),
                 'edgeCount' => $this->flow->edgeCount(),
             ],
         ];
+
+        if ($this->failedAnalysis()) {
+            $payload['error'] = $this->error;
+        }
 
         if ($this->configResolution !== null) {
             $payload['configResolution'] = $this->configResolution;

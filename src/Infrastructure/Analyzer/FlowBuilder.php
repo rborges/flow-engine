@@ -49,7 +49,91 @@ final class FlowBuilder
 
         $deduped = $this->dedupeById($nodes);
 
-        return new Flow($deduped, $edges, $symbols);
+        return new Flow($deduped, $this->resolveEdges($deduped, $edges), $symbols);
+    }
+
+    /**
+     * Resolve — ou descarta — as arestas cujo alvo só pode ser validado com o
+     * grafo inteiro em mãos: function_call e include.
+     *
+     * Ao visitar a chamada não há como saber se a função é nativa do PHP
+     * (str_replace), vem de um arquivo fora do scan (vendor) ou é do projeto.
+     * Aqui, com o grafo completo, a resposta é trivial: se não virou nó, a aresta
+     * não interessa. Evita depender de uma lista de builtins sempre incompleta.
+     *
+     * Antes de descartar, aplica a regra de resolução do próprio PHP: uma chamada
+     * não-qualificada dentro de um namespace cai para a função global quando não
+     * existe a versão namespaced. Sem isso, um arquivo com namespace chamando uma
+     * função global do projeto perderia a aresta.
+     *
+     * Só afeta function_call — arestas como __parent/__trait apontam de propósito
+     * para âncoras sem nó.
+     *
+     * @param Node[] $nodes
+     * @param \FlowEngine\Domain\Flow\Edge[] $edges
+     * @return \FlowEngine\Domain\Flow\Edge[]
+     */
+    private function resolveEdges(array $nodes, array $edges): array
+    {
+        $ids = [];
+        foreach ($nodes as $node) {
+            $ids[$node->id()] = true;
+        }
+
+        $resolved = [];
+
+        foreach ($edges as $edge) {
+            // include para fora do escopo do scan (vendor, arquivo não analisado):
+            // o alvo não virou nó, então a aresta não tem o que ligar.
+            if ($edge->type() === 'include') {
+                if (isset($ids[$edge->to()])) {
+                    $resolved[] = $edge;
+                }
+                continue;
+            }
+
+            if ($edge->type() !== 'function_call') {
+                $resolved[] = $edge;
+                continue;
+            }
+
+            if (isset($ids[$edge->to()])) {
+                $resolved[] = $edge;
+                continue;
+            }
+
+            $global = $this->globalFunctionId($edge->to());
+
+            if ($global !== null && isset($ids[$global])) {
+                $resolved[] = new \FlowEngine\Domain\Flow\Edge(
+                    $edge->from(),
+                    $global,
+                    $edge->method(),
+                    $edge->type()
+                );
+            }
+        }
+
+        return $resolved;
+    }
+
+    /**
+     * func:Namespace\nome → func:nome. Null quando o ID já é global.
+     */
+    private function globalFunctionId(string $functionId): ?string
+    {
+        if (!str_starts_with($functionId, 'func:')) {
+            return null;
+        }
+
+        $fqn = substr($functionId, 5);
+        $lastSeparator = strrpos($fqn, '\\');
+
+        if ($lastSeparator === false) {
+            return null;
+        }
+
+        return 'func:' . substr($fqn, $lastSeparator + 1);
     }
 
     /**

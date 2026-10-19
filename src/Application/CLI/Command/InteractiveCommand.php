@@ -3,11 +3,13 @@
 namespace FlowEngine\Application\CLI\Command;
 
 use FlowEngine\Bootstrap\Container;
+use FlowEngine\Domain\Contracts\BundledLibraryScanner;
 
 final class InteractiveCommand implements Command
 {
     public function __construct(
-        private \FlowEngine\Console\ConsoleIO $io
+        private \FlowEngine\Console\ConsoleIO $io,
+        private BundledLibraryScanner $libraryScanner
     ) {
     }
 
@@ -149,7 +151,7 @@ final class InteractiveCommand implements Command
 
     private function runInit(string $path): void
     {
-        $command = new InitCommand($this->io);
+        $command = new InitCommand($this->io, $this->libraryScanner);
         $command->handle(['bin/engine.php', 'init', $path]);
     }
 }

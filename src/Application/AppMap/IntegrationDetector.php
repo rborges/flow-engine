@@ -2,15 +2,27 @@
 
 namespace FlowEngine\Application\AppMap;
 
+use FlowEngine\Bootstrap\LanguageSupportCatalog;
 use FlowEngine\Domain\Contracts\Flow;
 
 final class IntegrationDetector
 {
     private NodeLocator $locator;
+    private CommentStripper $commentStripper;
+    private UrlClassifier $urlClassifier;
 
-    public function __construct(?NodeLocator $locator = null)
+    /** @var string[] */
+    private array $sourceExtensions = [];
+
+    public function __construct(?NodeLocator $locator = null, ?LanguageSupportCatalog $languageCatalog = null)
     {
         $this->locator = $locator ?? new NodeLocator();
+        $this->commentStripper = new CommentStripper();
+        $this->urlClassifier = new UrlClassifier();
+
+        foreach (($languageCatalog ?? new LanguageSupportCatalog())->entries() as $entry) {
+            array_push($this->sourceExtensions, ...$entry['extensions']);
+        }
     }
 
     /**
@@ -25,7 +37,7 @@ final class IntegrationDetector
 
         foreach ($files as $file) {
             $extension = strtolower((string) pathinfo($file, PATHINFO_EXTENSION));
-            if (!in_array($extension, ['php', 'dart'], true)) {
+            if (!in_array($extension, $this->sourceExtensions, true)) {
                 continue;
             }
 
@@ -33,6 +45,8 @@ final class IntegrationDetector
             if ($content === false) {
                 continue;
             }
+
+            $content = $this->commentStripper->strip($content, $extension);
 
             $lines = preg_split("/\r\n|\n|\r/", $content);
             if (!is_array($lines)) {
@@ -79,6 +93,7 @@ final class IntegrationDetector
                             'path' => (string) ($parts['path'] ?? ''),
                             'query' => (string) ($parts['query'] ?? ''),
                         ];
+                        $metadata['kind'] = $this->urlClassifier->kind($metadata['host'], $metadata['path']);
 
                         $calls[] = new IntegrationCall(
                             type: 'http',
@@ -111,6 +126,7 @@ final class IntegrationDetector
                                 'path' => (string) ($parts['path'] ?? ''),
                                 'query' => (string) ($parts['query'] ?? ''),
                                 'httpMethod' => $target['method'],
+                                'kind' => $this->urlClassifier->kind((string) ($parts['host'] ?? ''), (string) ($parts['path'] ?? '')),
                             ]
                         );
                     }

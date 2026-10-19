@@ -35,7 +35,14 @@ final class AppMapDiffCommand implements Command
             return;
         }
 
-        $diff = (new AppMapDiffAnalyzer())->diff($before, $after);
+        $analyzer = new AppMapDiffAnalyzer();
+        $failed = array_merge($analyzer->failedServices($before), $analyzer->failedServices($after));
+        if ($failed !== []) {
+            $this->io->error('Cannot diff appmaps with services that failed analysis: ' . implode(', ', array_unique($failed)));
+            return;
+        }
+
+        $diff = $analyzer->diff($before, $after);
         $policyPath = $this->extractOption($argv, '--policy');
 
         $payload = [

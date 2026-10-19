@@ -32,6 +32,8 @@ final readonly class NodeDTO
         public ?array $metadata = null,
         public ?int $endLine = null,
         public ?string $snippet = null,
+        public string $type = 'method',
+        public ?string $qualifier = null,
     ) {
     }
 
@@ -60,6 +62,8 @@ final readonly class NodeDTO
             metadata: $metadata,
             endLine: $endLine,
             snippet: null,
+            type: $node->type(),
+            qualifier: $node->qualifier(),
         );
     }
 
@@ -80,6 +84,8 @@ final readonly class NodeDTO
             metadata: $this->metadata,
             endLine: $this->endLine,
             snippet: $snippet,
+            type: $this->type,
+            qualifier: $this->qualifier,
         );
     }
 
@@ -105,6 +111,16 @@ final readonly class NodeDTO
             'visibility' => $this->visibility,
             'isPublic' => $this->isPublic,
         ];
+
+        // Omitido para 'method' — mantém a saída dos nós de classe idêntica à anterior.
+        if ($this->type !== 'method') {
+            $arr['type'] = $this->type;
+        }
+
+        // Presente só quando o nome do símbolo colide entre arquivos.
+        if ($this->qualifier !== null) {
+            $arr['qualifier'] = $this->qualifier;
+        }
 
         if ($this->metadata !== null) {
             $arr['metadata'] = $this->metadata;

@@ -4,7 +4,7 @@ namespace FlowEngine\Application\CLI\Command;
 
 use FlowEngine\AI\Export\ExportOptions;
 use FlowEngine\Application\AppMap\ApplicationMapBuilder;
-use FlowEngine\Application\AppMap\ServiceInfo;
+use FlowEngine\Bootstrap\CatalogServiceBuilder;
 use FlowEngine\Bootstrap\Container;
 use FlowEngine\Bootstrap\InfraServices;
 use FlowEngine\Console\ConsoleIO;
@@ -132,24 +132,7 @@ final class ContextCommand implements Command
             return null;
         }
 
-        $services = [];
-        foreach ($entries as $entry) {
-            $root = realpath($entry['path']) ?: $entry['path'];
-            $name = $entry['name'] ?? basename(rtrim($root, DIRECTORY_SEPARATOR));
-
-            $container = new Container($root);
-            $container->analyzeProject()->execute();
-
-            $files = $this->scanFiles($container);
-
-            $services[] = new ServiceInfo(
-                name: $name,
-                root: $root,
-                flow: $container->getFlow(),
-                files: $files,
-                hostnames: $entry['hostnames'] ?? []
-            );
-        }
+        $services = (new CatalogServiceBuilder())->buildFromEntries($entries);
 
         return (new ApplicationMapBuilder())->build($services);
     }
@@ -166,13 +149,5 @@ final class ContextCommand implements Command
             'name' => $entry['name'],
             'hostnames' => $entry['hostnames'] ?? [],
         ], $enriched);
-    }
-
-    /**
-     * @return string[]
-     */
-    private function scanFiles(Container $container): array
-    {
-        return $container->projectFiles();
     }
 }

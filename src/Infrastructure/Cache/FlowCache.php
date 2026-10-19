@@ -8,7 +8,8 @@ use FlowEngine\Infrastructure\Paths\StateDirectory;
 
 final class FlowCache
 {
-    private const SCHEMA_VERSION = 'v4.45.0';
+    // O hash não cobre o formato dos nós: mudança nele exige bump manual.
+    private const SCHEMA_VERSION = 'v4.48.0';
 
     private string $cacheDir;
     private string $flowFile;
@@ -146,6 +147,7 @@ final class FlowCache
     /**
      * @param string[] $files
      * @param string[] $duplicateIds
+     * @param string[] $analysisWarnings
      */
     public function saveFlow(
         Flow $flow,
@@ -155,6 +157,7 @@ final class FlowCache
         string $analysisSignature = '',
         ?array $expectedFileFingerprints = null,
         ?string $expectedConfigFingerprint = null,
+        array $analysisWarnings = [],
     ): string
     {
         AtomicFileWriter::ensurePrivateDirectory($this->cacheDir);
@@ -180,6 +183,7 @@ final class FlowCache
                 'edgeCount' => $data['stats']['edgeCount'] ?? 0,
                 'payloadHash' => hash('sha256', $compressed),
                 'duplicateIds' => array_values($duplicateIds),
+                'analysisWarnings' => array_values($analysisWarnings),
                 'fileFingerprints' => $fingerprints,
                 'configFingerprint' => $configFingerprint,
             ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
@@ -245,7 +249,7 @@ final class FlowCache
 
     /**
      * @param string[] $files
-     * @return array{flow: Flow, hash: string, duplicateIds: string[]}|null
+     * @return array{flow: Flow, hash: string, duplicateIds: string[], analysisWarnings: string[]}|null
      */
     public function loadValidFlow(array $files, string $configPath, string $analysisSignature = ''): ?array
     {
@@ -277,6 +281,7 @@ final class FlowCache
                 }
 
                 $ids = $meta['duplicateIds'] ?? [];
+                $warnings = $meta['analysisWarnings'] ?? [];
                 $flow = $this->loadFlow();
                 if (
                     $this->captureFileFingerprints($files) !== $fileFingerprints
@@ -289,6 +294,7 @@ final class FlowCache
                     'flow' => $flow,
                     'hash' => $hash,
                     'duplicateIds' => is_array($ids) ? array_values(array_filter($ids, 'is_string')) : [],
+                    'analysisWarnings' => is_array($warnings) ? array_values(array_filter($warnings, 'is_string')) : [],
                 ];
             });
         } catch (\Throwable $error) {

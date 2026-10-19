@@ -110,5 +110,75 @@ final class ApplicationMapBuilderTest extends TestCase
 
         self::assertNotEmpty($serviceEdges, 'Service-level edge should exist for HTTP dependency');
     }
-}
 
+    public function test_failed_service_skips_contract_consistency(): void
+    {
+        $contract = [['method' => 'GET', 'path' => '/orders', 'summary' => 'list']];
+        $services = [
+            ServiceInfo::failed('orders', sys_get_temp_dir(), 'LogicException: boom', contractEndpoints: $contract),
+            new ServiceInfo('billing', sys_get_temp_dir(), new Flow([], []), []),
+        ];
+
+        $map = (new ApplicationMapBuilder())->build($services);
+
+        self::assertSame([], $map['inconsistencies']);
+        self::assertSame('failed', $map['services'][0]['status']);
+        self::assertArrayNotHasKey('contract', $map['services'][0]);
+    }
+
+    public function test_warns_about_empty_and_failed_services_only(): void
+    {
+        $root = sys_get_temp_dir();
+        $services = [
+            ServiceInfo::failed('orders', $root, 'LogicException: boom'),
+            new ServiceInfo('billing', $root, new Flow([], []), [], configResolution: [
+                'detectedContext' => 'python',
+                'extensions' => ['py'],
+            ]),
+            new ServiceInfo('legacy', $root, new Flow([], []), []),
+            new ServiceInfo('inferred', $root, new Flow([], []), [], configResolution: [
+                'hasConfigFile' => false,
+                'detectedContext' => 'generic',
+                'extensions' => [],
+            ]),
+            new ServiceInfo('users', $root, new Flow([new Node('Users', 'list', $root . '/Users.php', 3, 'php')], []), []),
+        ];
+
+        $warnings = (new ApplicationMapBuilder())->build($services)['warnings'];
+
+        self::assertSame([
+            ['type' => 'SERVICE_FAILED', 'service' => 'orders', 'message' => 'analysis failed: LogicException: boom'],
+            ['type' => 'EMPTY_SERVICE', 'service' => 'billing', 'message' => 'analyzed with 0 nodes (context: python, extensions: py). Check scan.include and scan.extensions in its flow-engine.json.'],
+            ['type' => 'EMPTY_SERVICE', 'service' => 'legacy', 'message' => 'analyzed with 0 nodes. Check scan.include and scan.extensions in its flow-engine.json.'],
+            ['type' => 'EMPTY_SERVICE', 'service' => 'inferred', 'message' => 'analyzed with 0 nodes (context: generic, extensions: none). No flow-engine.json was found; run init on the service to configure its scan.'],
+        ], $warnings);
+    }
+
+    public function test_warnings_is_an_empty_list_when_every_service_has_nodes(): void
+    {
+        $root = sys_get_temp_dir();
+        $flow = new Flow([new Node('Users', 'list', $root . '/Users.php', 3, 'php')], []);
+
+        self::assertSame([], (new ApplicationMapBuilder())->build([new ServiceInfo('users', $root, $flow, [])])['warnings']);
+    }
+
+    public function test_asset_edges_stay_in_integration_edges_but_not_in_service_edges(): void
+    {
+        $base = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow-engine-appmap-asset-' . uniqid();
+        mkdir($base . DIRECTORY_SEPARATOR . 'web', 0777, true);
+        mkdir($base . DIRECTORY_SEPARATOR . 'cdn', 0777, true);
+        $file = $base . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . 'Page.php';
+        file_put_contents($file, "<?php\nclass Page {\n  public function render() {\n    return 'http://static-files/app.css' . 'http://static-files/health';\n  }\n}\n");
+
+        $web = new ServiceInfo('web', dirname($file), new Flow([new Node('Page', 'render', $file, 3, 'php')], []), [$file]);
+        $cdn = new ServiceInfo('cdn', $base . DIRECTORY_SEPARATOR . 'cdn', new Flow([], []), [], ['static-files']);
+
+        $map = (new ApplicationMapBuilder())->build([$web, $cdn]);
+
+        self::assertSame(
+            ['asset', 'http'],
+            array_map(fn(array $e) => $e['metadata']['kind'], $map['integrationEdges'])
+        );
+        self::assertSame([['from' => 'web', 'to' => 'cdn', 'type' => 'http', 'count' => 1]], $map['serviceEdges']);
+    }
+}

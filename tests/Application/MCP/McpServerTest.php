@@ -583,6 +583,25 @@ class McpServerTest extends TestCase
         $this->assertContains('Configured scan languages were found, but no matching analyzable files were detected.', $payload['warnings']);
     }
 
+    public function test_flow_map_catalog_warns_about_empty_service(): void
+    {
+        $catalog = $this->createCatalogFixture();
+        $empty = $this->createUnsupportedProjectFixture();
+        $data = json_decode((string) file_get_contents($catalog), true);
+        $data['services'][] = ['name' => 'svc-empty', 'path' => $empty];
+        file_put_contents($catalog, (string) json_encode($data));
+
+        $payload = $this->dispatchJsonTool('flow_map', [
+            'catalog' => $catalog,
+            'depth' => 1,
+        ]);
+
+        $empty = array_values(array_filter($payload['warnings'], static fn(string $w): bool => str_starts_with($w, 'svc-empty: ')));
+        $this->assertCount(1, $empty);
+        $this->assertStringContainsString('analyzed with 0 nodes (context: php, extensions: php)', $empty[0]);
+        $this->assertSame([], array_filter($payload['warnings'], static fn(string $w): bool => str_starts_with($w, 'svc-a: ')));
+    }
+
     public function test_flow_lookup_service_summary_works_for_catalog(): void
     {
         $catalog = $this->createCatalogFixture();

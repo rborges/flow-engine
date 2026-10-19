@@ -6,6 +6,9 @@ use FlowEngine\Domain\Flow\Edge;
 use FlowEngine\Domain\Flow\Node;
 use FlowEngine\Domain\Flow\NodeFactory;
 use FlowEngine\Infrastructure\Analyzer\Visitors\ClassVisitor;
+use FlowEngine\Infrastructure\Analyzer\Visitors\FreeFunctionVisitor;
+use FlowEngine\Infrastructure\Analyzer\Visitors\FunctionCallVisitor;
+use FlowEngine\Infrastructure\Analyzer\Visitors\IncludeVisitor;
 use FlowEngine\Infrastructure\Analyzer\Visitors\LocalAssignVisitor;
 use FlowEngine\Infrastructure\Analyzer\Visitors\MethodCallVisitor;
 use FlowEngine\Infrastructure\Analyzer\Visitors\MethodVisitor;
@@ -50,7 +53,8 @@ final class AstParser implements FileParser
     private array $visitors = [];
 
     public function __construct(
-        private readonly NodeFactory $nodeFactory
+        private readonly NodeFactory $nodeFactory,
+        private readonly ?string $projectRoot = null
     ) {
         // Registrar visitors padrão
         // ORDEM IMPORTANTE: Structural primeiro, depois call detection
@@ -62,11 +66,14 @@ final class AstParser implements FileParser
             new NamespaceVisitor(),
             new ClassVisitor(),
             new MethodVisitor(),
-            
+            new FreeFunctionVisitor(),  // must run before call detection to open the function scope
+
             // 2. Call Detection (usam contexto)
             new LocalAssignVisitor(),   // must run before MethodCallVisitor to populate localVariableTypes
             new MethodCallVisitor(),
             new StaticCallVisitor(),
+            new FunctionCallVisitor(),
+            new IncludeVisitor(),
             new HttpFacadeCallVisitor(),
             new PropertyAccessVisitor(),
             new StaticPropertyVisitor(),
@@ -124,8 +131,29 @@ final class AstParser implements FileParser
             return ['nodes' => [], 'edges' => [], 'symbols' => []];
         }
 
+        // Um arquivo só vira nó quando é um "script": tem código executável de topo
+        // ou declara funções livres. Arquivos que apenas declaram classes continuam
+        // fora do grafo, o que mantém o resultado de projetos modernos inalterado.
+        $relativePath = ProjectRelativePath::for($file, $this->projectRoot);
+
+        $fileNodeId = $this->isScript($ast)
+            ? 'file:' . $relativePath
+            : null;
+
         // Criar contexto compartilhado
-        $context = new VisitorContext($file, $this->nodeFactory);
+        $context = new VisitorContext($file, $this->nodeFactory, $fileNodeId, $this->projectRoot);
+
+        if ($fileNodeId !== null) {
+            $context->addNode($this->nodeFactory->create(
+                class: $relativePath,
+                method: '__file',
+                file: $file,
+                line: null,
+                language: 'php',
+                metadata: null,
+                type: Node::TYPE_FILE
+            ));
+        }
 
         // Criar traverser e adicionar visitor delegador
         $traverser = new NodeTraverser();
@@ -143,8 +171,51 @@ final class AstParser implements FileParser
     }
 
     /**
+     * Um arquivo é "script" quando executa algo ao ser incluído: código de topo,
+     * HTML inline, chamadas, atribuições.
+     *
+     * Arquivos que apenas declaram (classes, interfaces, traits, funções, consts)
+     * não executam nada e não viram nó-arquivo — as declarações em si já são nós.
+     * É isso que mantém o grafo de projetos modernos idêntico ao anterior.
+     *
+     * @param \PhpParser\Node\Stmt[] $stmts
+     */
+    private function isScript(array $stmts): bool
+    {
+        foreach ($stmts as $stmt) {
+            // Wrappers: o que importa está dentro deles.
+            if ($stmt instanceof \PhpParser\Node\Stmt\Namespace_
+                || $stmt instanceof \PhpParser\Node\Stmt\Declare_
+            ) {
+                if ($this->isScript($stmt->stmts ?? [])) {
+                    return true;
+                }
+                continue;
+            }
+
+            // Declarações puras: não executam nada por si só.
+            if ($stmt instanceof \PhpParser\Node\Stmt\Class_
+                || $stmt instanceof \PhpParser\Node\Stmt\Interface_
+                || $stmt instanceof \PhpParser\Node\Stmt\Trait_
+                || $stmt instanceof \PhpParser\Node\Stmt\Enum_
+                || $stmt instanceof \PhpParser\Node\Stmt\Function_
+                || $stmt instanceof \PhpParser\Node\Stmt\Use_
+                || $stmt instanceof \PhpParser\Node\Stmt\GroupUse
+                || $stmt instanceof \PhpParser\Node\Stmt\Const_
+                || $stmt instanceof \PhpParser\Node\Stmt\Nop
+            ) {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Cria visitor que delega para visitors registrados.
-     * 
+     *
      * @internal
      */
     private function createDelegatingVisitor(VisitorContext $context): object
