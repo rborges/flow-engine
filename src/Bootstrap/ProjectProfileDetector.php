@@ -142,12 +142,17 @@ final class ProjectProfileDetector
                 continue;
             }
 
+            if (!is_readable($base)) {
+                throw new \RuntimeException(sprintf('Configured scan root is not readable: %s', $base));
+            }
+
             // Poda os diretórios ignorados: sem isso um include "." percorre node_modules/.venv inteiros.
             $iterator = new \RecursiveIteratorIterator(
                 new \RecursiveCallbackFilterIterator(
                     new \RecursiveDirectoryIterator($base, \FilesystemIterator::SKIP_DOTS),
                     fn(\SplFileInfo $entry): bool => !$entry->isDir()
-                        || !$this->isIgnored($this->relativeTo($root, $entry->getPathname()), $ignoredPaths)
+                        || (!$this->isIgnored($this->relativeTo($root, $entry->getPathname()), $ignoredPaths)
+                            && is_readable($entry->getPathname()))
                 ),
                 \RecursiveIteratorIterator::LEAVES_ONLY,
                 \RecursiveIteratorIterator::CATCH_GET_CHILD
