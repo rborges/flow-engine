@@ -134,7 +134,8 @@ final class ApplicationMapBuilder
             }
             $arr['endpoints'] = $codeEndpoints;
 
-            if ($s->contractEndpoints !== null) {
+            // Serviço sem análise não tem endpoints de código: comparar com o contrato só gera falso positivo.
+            if ($s->contractEndpoints !== null && !$s->failedAnalysis()) {
                 $arr['contract'] = ['endpointCount' => count($s->contractEndpoints)];
                 foreach ($this->checkContractConsistency($codeEndpoints, $s->contractEndpoints, $s->name) as $issue) {
                     $inconsistencies[] = $issue;

@@ -11,6 +11,7 @@ use FlowEngine\Application\AppMap\MermaidDiagramGenerator;
 use FlowEngine\Application\AppMap\ServiceInfo;
 use FlowEngine\Application\DTO\EdgeDTO;
 use FlowEngine\Application\DTO\NodeDTO;
+use FlowEngine\Bootstrap\CatalogServiceBuilder;
 use FlowEngine\Bootstrap\Container;
 use FlowEngine\Bootstrap\InfraServices;
 use RuntimeException;
@@ -304,6 +305,11 @@ final class ReadOnlyApi
             return $this->error(400, 'Current catalog must include at least 2 services with valid paths');
         }
 
+        $incomplete = $this->incompleteMapsError($baselineMap, $currentMap);
+        if ($incomplete !== null) {
+            return $incomplete;
+        }
+
         $drift = (new AppMapDiffAnalyzer())->diff(
             ['appmap' => $baselineMap],
             ['appmap' => $currentMap]
@@ -350,6 +356,11 @@ final class ReadOnlyApi
         $currentMap = $this->buildAppMapFromCatalog($currentCatalog);
         if ($currentMap === null) {
             return $this->error(400, 'Current catalog must include at least 2 services with valid paths');
+        }
+
+        $incomplete = $this->incompleteMapsError($baselineMap, $currentMap);
+        if ($incomplete !== null) {
+            return $incomplete;
         }
 
         $policy = $this->loadJsonObjectFile($policyPath);
@@ -835,6 +846,21 @@ final class ReadOnlyApi
     /**
      * @return array{status: int, body: array<string, mixed>}
      */
+    /**
+     * @param array<string, mixed> $baselineMap
+     * @param array<string, mixed> $currentMap
+     * @return array<string, mixed>|null
+     */
+    private function incompleteMapsError(array $baselineMap, array $currentMap): ?array
+    {
+        $analyzer = new AppMapDiffAnalyzer();
+        $failed = array_unique(array_merge($analyzer->failedServices($baselineMap), $analyzer->failedServices($currentMap)));
+
+        return $failed === []
+            ? null
+            : $this->error(422, 'Cannot compute drift: services failed analysis: ' . implode(', ', $failed));
+    }
+
     private function error(int $status, string $message): array
     {
         return [
@@ -984,29 +1010,10 @@ final class ReadOnlyApi
      *   }
      * }> $entries
      * @return array<int, ServiceInfo>
-     * @return array<int, ServiceInfo>
      */
     private function buildServices(array $entries): array
     {
-        $services = [];
-        foreach ($entries as $entry) {
-            $root = realpath($entry['path']) ?: $entry['path'];
-            $name = $entry['name'] ?? basename(rtrim($root, DIRECTORY_SEPARATOR));
-
-            $container = new Container($root);
-            $container->analyzeProject()->execute();
-
-            $services[] = new ServiceInfo(
-                name: $name,
-                root: $root,
-                flow: $container->getFlow(),
-                files: $this->scanFiles($container),
-                hostnames: $entry['hostnames'] ?? [],
-                contractEndpoints: $entry['contractEndpoints'] ?? null,
-            );
-        }
-
-        return $services;
+        return (new CatalogServiceBuilder())->buildFromEntries($entries);
     }
 
     /**
@@ -1127,13 +1134,5 @@ final class ReadOnlyApi
             'serviceMappings' => array_values(is_array($docker['serviceMappings'] ?? null) ? $docker['serviceMappings'] : []),
             'warnings' => array_values(array_unique(is_array($docker['warnings'] ?? null) ? $docker['warnings'] : [])),
         ];
-    }
-
-    /**
-     * @return string[]
-     */
-    private function scanFiles(Container $container): array
-    {
-        return $container->projectFiles();
     }
 }

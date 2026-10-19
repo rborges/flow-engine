@@ -110,5 +110,19 @@ final class ApplicationMapBuilderTest extends TestCase
 
         self::assertNotEmpty($serviceEdges, 'Service-level edge should exist for HTTP dependency');
     }
-}
 
+    public function test_failed_service_skips_contract_consistency(): void
+    {
+        $contract = [['method' => 'GET', 'path' => '/orders', 'summary' => 'list']];
+        $services = [
+            ServiceInfo::failed('orders', sys_get_temp_dir(), 'LogicException: boom', contractEndpoints: $contract),
+            new ServiceInfo('billing', sys_get_temp_dir(), new Flow([], []), []),
+        ];
+
+        $map = (new ApplicationMapBuilder())->build($services);
+
+        self::assertSame([], $map['inconsistencies']);
+        self::assertSame('failed', $map['services'][0]['status']);
+        self::assertArrayNotHasKey('contract', $map['services'][0]);
+    }
+}

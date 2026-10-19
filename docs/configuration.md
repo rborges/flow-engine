@@ -45,7 +45,7 @@ Three fields are required: `version`, `context.type`, and `scan.include`. A typi
 
 ### Optional
 
-- `context.autoload`: path to a Composer autoloader, for example `vendor/autoload.php`. Use `null` when there is none.
+- `context.autoload`: path to a Composer autoloader, for example `vendor/autoload.php`. Static analysis never loads it; only `inputs` and `run-guided`, which reflect on or execute project code, do. When `null` or omitted, those commands fall back to `vendor/autoload.php` if it exists.
 - `scan.exclude`: directories or files to ignore. Default: none for Composer projects; Flutter projects (`context.type: flutter`) fall back to Flutter-specific exclusions (`.dart_tool`, `.pub-cache`, `build`, ...).
 - `scan.extensions`: file extensions to parse (not language names). Default: `["php"]` for Composer projects; Flutter projects default to `["dart"]`, plus `"py"` when a `backend/app` directory exists.
 - `architecture.layers`: named layers mapped to namespace prefixes (see below).

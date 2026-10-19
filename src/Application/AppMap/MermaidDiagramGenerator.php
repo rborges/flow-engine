@@ -27,7 +27,9 @@ final class MermaidDiagramGenerator
                 $id = $this->id($name);
                 $label = $this->escape($name);
                 $langs = $svc['languages'] ?? [];
-                $langText = is_array($langs) ? implode(',', $langs) : '';
+                $langText = ($svc['status'] ?? 'ok') === 'failed'
+                    ? 'analysis failed'
+                    : (is_array($langs) ? implode(',', $langs) : '');
 
                 $lines[] = "  {$id}[\"{$label}\\n{$langText}\"]";
             }
@@ -192,7 +194,9 @@ final class MermaidDiagramGenerator
             $langs     = implode(', ', (array) ($svc['languages'] ?? []));
             $nodeCount = (int) ($svc['stats']['nodeCount'] ?? 0);
             $endpoints = count((array) ($svc['endpoints'] ?? []));
-            $desc      = $nodeCount . ' nodes' . ($endpoints > 0 ? " · {$endpoints} endpoints" : '');
+            $desc      = ($svc['status'] ?? 'ok') === 'failed'
+                ? 'analysis failed'
+                : $nodeCount . ' nodes' . ($endpoints > 0 ? " · {$endpoints} endpoints" : '');
 
             $id     = $this->id($name);
             $lines[] = sprintf(

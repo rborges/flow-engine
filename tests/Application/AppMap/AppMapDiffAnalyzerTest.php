@@ -51,4 +51,15 @@ final class AppMapDiffAnalyzerTest extends TestCase
         self::assertCount(0, $diff['breakingChanges']['servicesRemoved']);
         self::assertCount(1, $diff['breakingChanges']['serviceEdgesRemoved']);
     }
+
+    public function test_it_lists_services_that_failed_analysis(): void
+    {
+        $appmap = ['appmap' => ['services' => [
+            ['name' => 'a', 'status' => 'ok'],
+            ['name' => 'b', 'status' => 'failed', 'error' => 'boom'],
+            ['name' => 'legacy'],
+        ]]];
+
+        self::assertSame(['b'], (new AppMapDiffAnalyzer())->failedServices($appmap));
+    }
 }
