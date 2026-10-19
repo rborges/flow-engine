@@ -10,6 +10,7 @@ final class ReportCache
     private string $cacheDir;
     private string $reportsFile;
     private string $metaFile;
+    private string $lockFile;
 
     public function __construct(ProjectContext $context)
     {
@@ -18,18 +19,26 @@ final class ReportCache
         $this->cacheDir = $stateDir . DIRECTORY_SEPARATOR . 'cache';
         $this->reportsFile = $this->cacheDir . DIRECTORY_SEPARATOR . 'reports.json.gz';
         $this->metaFile = $this->cacheDir . DIRECTORY_SEPARATOR . 'reports-meta.json';
+        $this->lockFile = $this->cacheDir . DIRECTORY_SEPARATOR . 'reports.lock';
     }
 
     public function isValid(string $hash): bool
     {
-        if (!file_exists($this->reportsFile) || !file_exists($this->metaFile)) {
-            return false;
-        }
+        return $this->withLock(LOCK_SH, function () use ($hash): bool {
+            if (!file_exists($this->reportsFile) || !file_exists($this->metaFile)) {
+                return false;
+            }
 
-        $meta = json_decode((string) file_get_contents($this->metaFile), true);
-        $cachedHash = $meta['hash'] ?? null;
+            $meta = json_decode((string) file_get_contents($this->metaFile), true);
+            if (!is_array($meta) || ($meta['hash'] ?? null) !== $hash) {
+                return false;
+            }
 
-        return $cachedHash === $hash;
+            $payloadHash = hash_file('sha256', $this->reportsFile);
+            return $payloadHash !== false
+                && isset($meta['payloadHash'])
+                && hash_equals((string) $meta['payloadHash'], $payloadHash);
+        });
     }
 
     /**
@@ -38,7 +47,7 @@ final class ReportCache
     public function load(): array
     {
         $raw = (string) file_get_contents($this->reportsFile);
-        $json = gzdecode($raw);
+        $json = @gzdecode($raw);
 
         if ($json === false) {
             throw new \RuntimeException('Failed to decode reports cache');
@@ -54,24 +63,86 @@ final class ReportCache
     }
 
     /**
+     * @return array<string, mixed>|null
+     */
+    public function loadValid(string $hash): ?array
+    {
+        return $this->withLock(LOCK_SH, function () use ($hash): ?array {
+            if (!file_exists($this->reportsFile) || !file_exists($this->metaFile)) {
+                return null;
+            }
+
+            $meta = json_decode((string) file_get_contents($this->metaFile), true);
+            if (!is_array($meta) || ($meta['hash'] ?? null) !== $hash || !isset($meta['payloadHash'])) {
+                return null;
+            }
+
+            $payloadHash = hash_file('sha256', $this->reportsFile);
+            if ($payloadHash === false || !hash_equals((string) $meta['payloadHash'], $payloadHash)) {
+                return null;
+            }
+
+            try {
+                $reports = $this->load();
+            } catch (\RuntimeException) {
+                return null;
+            }
+
+            if ($reports === []) {
+                return null;
+            }
+            foreach ($reports as $name => $report) {
+                if (!is_string($name) || !is_array($report)) {
+                    return null;
+                }
+            }
+
+            return $reports;
+        });
+    }
+
+    /**
      * @param array<string, mixed> $reports
      */
     public function save(array $reports, string $hash): void
     {
-        if (!is_dir($this->cacheDir)) {
-            mkdir($this->cacheDir, 0777, true);
-        }
-
         $payload = json_encode($reports, JSON_THROW_ON_ERROR);
         $compressed = gzencode($payload, 6);
+        if ($compressed === false) {
+            throw new \RuntimeException('Failed to compress reports cache');
+        }
 
-        file_put_contents($this->reportsFile, $compressed);
-        file_put_contents(
-            $this->metaFile,
-            json_encode([
-                'hash' => $hash,
-                'generatedAt' => time(),
-            ], JSON_PRETTY_PRINT)
-        );
+        $meta = json_encode([
+            'hash' => $hash,
+            'payloadHash' => hash('sha256', $compressed),
+            'generatedAt' => time(),
+        ], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+
+        $this->withLock(LOCK_EX, function () use ($compressed, $meta): void {
+            AtomicFileWriter::write($this->reportsFile, $compressed);
+            AtomicFileWriter::write($this->metaFile, $meta);
+        });
+    }
+
+    private function withLock(int $operation, callable $callback): mixed
+    {
+        AtomicFileWriter::ensurePrivateDirectory($this->cacheDir);
+        $handle = fopen($this->lockFile, 'c+b');
+        if ($handle === false) {
+            throw new \RuntimeException(sprintf('Failed to open reports cache lock: %s', $this->lockFile));
+        }
+
+        try {
+            if (!flock($handle, $operation)) {
+                throw new \RuntimeException(sprintf('Failed to acquire reports cache lock: %s', $this->lockFile));
+            }
+            try {
+                return $callback();
+            } finally {
+                flock($handle, LOCK_UN);
+            }
+        } finally {
+            fclose($handle);
+        }
     }
 }

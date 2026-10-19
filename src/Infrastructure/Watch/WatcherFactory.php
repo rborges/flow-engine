@@ -22,19 +22,25 @@ final class WatcherFactory
      * @param callable():bool $hasChanged
      * @param string[] $paths
      */
-    public function create(string $mode, callable $hasChanged, array $paths): Watcher
+    public function create(
+        string $mode,
+        callable $hasChanged,
+        array $paths,
+        array $ignoredPaths = [],
+        ?string $projectRoot = null,
+    ): Watcher
     {
         return match ($mode) {
             'polling' => new PollingWatcher($hasChanged),
-            'native' => $this->createNative($paths, $hasChanged),
-            default => $this->createAuto($paths, $hasChanged),
+            'native' => $this->createNative($paths, $hasChanged, $ignoredPaths, $projectRoot),
+            default => $this->createAuto($paths, $hasChanged, $ignoredPaths, $projectRoot),
         };
     }
 
     /**
      * @param string[] $paths
      */
-    private function createAuto(array $paths, callable $hasChanged): Watcher
+    private function createAuto(array $paths, callable $hasChanged, array $ignoredPaths, ?string $projectRoot): Watcher
     {
         if ($this->environment->isDocker()) {
             return new PollingWatcher($hasChanged);
@@ -42,7 +48,7 @@ final class WatcherFactory
 
         if ($this->inotifyAvailable) {
             try {
-                return new InotifyWatcher($paths);
+                return new InotifyWatcher($paths, $hasChanged, $ignoredPaths, $projectRoot);
             } catch (\Throwable $e) {
                 return new PollingWatcher($hasChanged);
             }
@@ -54,10 +60,10 @@ final class WatcherFactory
     /**
      * @param string[] $paths
      */
-    private function createNative(array $paths, callable $hasChanged): Watcher
+    private function createNative(array $paths, callable $hasChanged, array $ignoredPaths, ?string $projectRoot): Watcher
     {
         if ($this->inotifyAvailable) {
-            return new InotifyWatcher($paths);
+            return new InotifyWatcher($paths, $hasChanged, $ignoredPaths, $projectRoot);
         }
 
         return new PollingWatcher($hasChanged);

@@ -105,6 +105,19 @@ php bin/engine.php snapshot <project> --compare=before-change
 php bin/engine.php architecture-gate <project> --baseline=before-change --fail-on=new
 ```
 
+When contributing to Flow Engine itself, save the main-branch baseline before editing and run the
+PR gate after the change:
+
+```bash
+composer gate:baseline
+composer gate:pr
+```
+
+Snapshots and caches live in the user state directory, not inside the analyzed project. Cache
+validity follows file content and the complete graph-producing implementation, so a same-size edit
+with a restored timestamp is still detected. If project sources change while analysis is running,
+the result is rejected instead of being published under metadata for different content.
+
 ## Next Steps
 
 - [CLI commands](CLI_COMMANDS.md)

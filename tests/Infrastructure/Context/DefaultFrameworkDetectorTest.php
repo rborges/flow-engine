@@ -83,7 +83,7 @@ final class DefaultFrameworkDetectorTest extends TestCase
 
     private function createContextForPath(string $path): ProjectContext
     {
-        $context = $this->createMock(ProjectContext::class);
+        $context = $this->createStub(ProjectContext::class);
         $context->method('rootPath')->willReturn($path);
 
         return $context;

@@ -58,6 +58,102 @@ final class StalenessCheckerTest extends TestCase
         self::assertSame([], $report->deletedFiles);
     }
 
+    public function test_detects_same_size_content_change_with_restored_mtime(): void
+    {
+        $project = $this->tempDir . '/project-content';
+        $source = $project . '/src/Changed.php';
+        $this->writeFile($source, 'alpha');
+        $mtime = filemtime($source);
+
+        $context = new InferredReadOnlyProjectContext(
+            rootPath: $project,
+            includePaths: ['src'],
+            ignoredPaths: [],
+            extensions: ['php'],
+        );
+        $cache = new FlowCache($context);
+        $cache->saveFlow(new Flow([], []), [$source], $project . '/flow-engine.json');
+
+        file_put_contents($source, 'bravo');
+        touch($source, $mtime);
+        clearstatcache(true, $source);
+
+        $report = (new StalenessChecker($cache, new FilesystemProjectScanner(), $context))->execute();
+
+        self::assertTrue($report->stale);
+        self::assertSame([$source], $report->changedFiles);
+    }
+
+    public function test_detects_first_file_created_after_an_empty_cache(): void
+    {
+        $project = $this->tempDir . '/empty-project';
+        mkdir($project, 0777, true);
+        $context = new InferredReadOnlyProjectContext(
+            rootPath: $project,
+            includePaths: ['.'],
+            ignoredPaths: [],
+            extensions: ['php'],
+        );
+        $cache = new FlowCache($context);
+        $cache->saveFlow(new Flow([], []), [], $project . '/flow-engine.json');
+        $source = $project . '/First.php';
+        file_put_contents($source, "<?php\n");
+
+        $report = (new StalenessChecker($cache, new FilesystemProjectScanner(), $context))->execute();
+
+        self::assertTrue($report->stale);
+        self::assertSame([$source], $report->newFiles);
+    }
+
+    public function test_cold_cache_does_not_claim_sources_changed_since_a_previous_cache(): void
+    {
+        $project = $this->tempDir . '/cold-project';
+        $source = $project . '/src/App.php';
+        $this->writeFile($source, "<?php\n");
+        $context = new InferredReadOnlyProjectContext(
+            rootPath: $project,
+            includePaths: ['src'],
+            ignoredPaths: [],
+            extensions: ['php'],
+        );
+
+        $report = (new StalenessChecker(
+            new FlowCache($context),
+            new FilesystemProjectScanner(),
+            $context,
+        ))->execute();
+
+        self::assertFalse($report->stale);
+        self::assertSame(0, $report->totalChanged);
+        self::assertSame('', $report->summaryWarning());
+    }
+
+    public function test_detects_configuration_only_change(): void
+    {
+        $project = $this->tempDir . '/config-project';
+        $config = $project . '/flow-engine.json';
+        $this->writeFile($config, "{\n  \"scan\": {}\n}\n");
+
+        $context = new InferredReadOnlyProjectContext(
+            rootPath: $project,
+            includePaths: ['src'],
+            ignoredPaths: [],
+            extensions: ['php'],
+        );
+        $cache = new FlowCache($context);
+        $cache->saveFlow(new Flow([], []), [], $config);
+
+        file_put_contents($config, "{\n  \"scan\": {\"include\": [\"src\"]}\n}\n");
+
+        $report = (new StalenessChecker($cache, new FilesystemProjectScanner(), $context))->execute();
+
+        self::assertTrue($report->stale);
+        self::assertTrue($report->configChanged);
+        self::assertSame(1, $report->totalChanged);
+        self::assertSame([], $report->changedFiles);
+        self::assertStringContainsString('flow-engine.json', $report->summaryWarning());
+    }
+
     private function writeFile(string $path, string $content): void
     {
         $dir = dirname($path);

@@ -5,6 +5,7 @@ namespace FlowEngine\Application\InfraMap;
 use FlowEngine\Application\InfraMap\Contract\CatalogLoader;
 use FlowEngine\Application\InfraMap\Contract\DockerTopologyReader;
 use FlowEngine\Application\InfraMap\Contract\ProjectSectionAnalyzer;
+use FlowEngine\Application\InfraMap\Contract\SourceConfigurationInspector;
 
 final class InfraMapBuilder
 {
@@ -17,6 +18,7 @@ final class InfraMapBuilder
         private ProjectSectionAnalyzer $webAnalyzer,
         private ProjectSectionAnalyzer $scriptAnalyzer,
         private CatalogLoader $catalogLoader,
+        private SourceConfigurationInspector $sourceConfigurationInspector,
     ) {
     }
 
@@ -41,7 +43,7 @@ final class InfraMapBuilder
                 'root' => $root,
             ],
             'sections' => $sections,
-            'warnings' => [],
+            'warnings' => $this->sourceConfigurationInspector->warningsFor($root),
             'edges' => [],
         ];
 
@@ -96,6 +98,7 @@ final class InfraMapBuilder
             $servicePayload = [
                 'name' => $entry['name'] ?? basename(rtrim($root, DIRECTORY_SEPARATOR)),
                 'root' => $root,
+                'warnings' => $this->sourceConfigurationInspector->warningsFor($root),
             ];
             $serviceSections = array_values(array_diff($sections, ['docker']));
             $this->appendProjectSections($servicePayload, $root, $mode, $serviceSections);

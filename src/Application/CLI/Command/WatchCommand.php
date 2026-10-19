@@ -31,16 +31,20 @@ final class WatchCommand implements Command
         $container = new Container($projectPath);
         $container->analyzeProject()->execute();
 
-        $cache = $container->flowCache();
-        $configPath = rtrim($projectPath, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'flow-engine.json';
-        $files = $this->scanFiles($container);
-
-        $hasChanged = function () use ($cache, $files, $configPath): bool {
-            return !$cache->isValid($files, $configPath);
+        $hasChanged = function () use ($projectPath): bool {
+            return !(new Container($projectPath))->areFlowCacheInputsCurrent();
         };
 
+        $configResolution = $container->configResolution();
+
         $watcher = $container->watcherFactory()
-            ->create($watcherMode, $hasChanged, $this->watchPaths($projectPath, $files));
+            ->create(
+                $watcherMode,
+                $hasChanged,
+                $this->watchPaths($projectPath, $configResolution->includePaths),
+                $container->effectiveIgnoredPaths(),
+                $projectPath,
+            );
 
         $this->io->json([
             'event' => 'watcher',
@@ -94,32 +98,25 @@ final class WatchCommand implements Command
     /**
      * @return string[]
      */
-    private function scanFiles(Container $container): array
+    /** @param string[] $includePaths */
+    private function watchPaths(string $projectPath, array $includePaths): array
     {
-        $flow = $container->getFlow();
-        $files = [];
-
-        foreach ($flow->nodes() as $node) {
-            $files[] = $node->file();
+        if ($includePaths === []) {
+            return [$projectPath];
         }
 
-        return array_values(array_unique($files));
-    }
-
-    /**
-     * @param string[] $files
-     * @return string[]
-     */
-    private function watchPaths(string $projectPath, array $files): array
-    {
-        $paths = [$projectPath];
-
-        foreach ($files as $file) {
-            $dir = dirname($file);
-            $paths[] = $dir;
+        $paths = [];
+        foreach ($includePaths as $includePath) {
+            $includePath = trim((string) $includePath, "/\\");
+            $path = $includePath === '' || $includePath === '.'
+                ? $projectPath
+                : $projectPath . DIRECTORY_SEPARATOR . $includePath;
+            if (is_dir($path)) {
+                $paths[] = $path;
+            }
         }
 
-        return array_values(array_unique($paths));
+        return $paths === [] ? [$projectPath] : array_values(array_unique($paths));
     }
 
     /**

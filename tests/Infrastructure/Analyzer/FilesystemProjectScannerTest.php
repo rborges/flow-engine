@@ -216,4 +216,39 @@ final class FilesystemProjectScannerTest extends TestCase
 
         $this->assertSame([], $result);
     }
+
+    public function test_reports_unreadable_non_ignored_directory_and_keeps_scanning(): void
+    {
+        $this->createFile('src/App.php');
+        $this->createFile('blocked/Secret.php');
+        $blocked = $this->tmpDir . DIRECTORY_SEPARATOR . 'blocked';
+        $scanner = new FilesystemProjectScanner(
+            static fn(string $path): bool => $path !== $blocked
+        );
+
+        $result = $scanner->scan($this->makeContext(includePaths: ['.']));
+
+        $this->assertCount(1, $result);
+        $this->assertStringEndsWith('App.php', $result[0]);
+        $this->assertSame(['Skipped unreadable directory: blocked'], $scanner->scanWarnings());
+    }
+
+    public function test_prunes_ignored_directory_before_readability_check(): void
+    {
+        $this->createFile('src/App.php');
+        $this->createFile('storage/private/Secret.php');
+        $checks = [];
+        $scanner = new FilesystemProjectScanner(
+            static function (string $path) use (&$checks): bool {
+                $checks[] = $path;
+                return true;
+            }
+        );
+
+        $result = $scanner->scan($this->makeContext(includePaths: ['.'], ignoredPaths: ['storage']));
+
+        $this->assertCount(1, $result);
+        $this->assertSame([], $scanner->scanWarnings());
+        $this->assertNotContains($this->tmpDir . DIRECTORY_SEPARATOR . 'storage', $checks);
+    }
 }

@@ -54,6 +54,30 @@ The repository includes `.mcp.json`:
 
 All tools are local and read-only.
 
+Code-analysis project tools validate the local content cache and refresh it automatically before building a
+response. When source files or `flow-engine.json` changed, the response reports what triggered the refresh; no second tool
+call is required. Ignored unreadable directories are pruned, while unreadable directories in the
+active source scope are returned as explicit warnings. Every code-analysis project tool propagates analysis
+warnings, including cache corruption and duplicate node IDs; Markdown tools render them before the
+result and JSON tools return them in `warnings`. `flow_infra_map` remains independent of source
+analysis configuration so Docker, proxy, web, scripts, and file inventory stay available when code
+configuration is invalid or a source root is unreadable. Invalid source configuration is reported as
+a non-blocking warning in the infrastructure response.
+
+## Tool Annotations
+
+Every tool declares the standard [MCP tool annotations](https://modelcontextprotocol.io/specification/2025-03-26/server/tools#tool-annotations)
+in `tools/list`: `readOnlyHint: true`, `destructiveHint: false`,
+`idempotentHint: true`, `openWorldHint: false`. The engine analyzes code
+without mutating the target project, so clients can rely on these hints for
+permission decisions.
+
+This matters in Claude Code plan mode: MCP tools that do not declare
+`readOnlyHint` are hard-blocked there ("Cannot call ... while in plan mode"),
+even when a `permissions.allow` rule matches the tool. With the annotations in
+place, plan mode falls back to the regular permission flow, where a
+server-level allow rule such as `mcp__flow-engine` removes the prompts.
+
 ## Recommended AI Workflow
 
 1. Call `flow_map` to understand project shape.

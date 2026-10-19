@@ -62,7 +62,11 @@ final class PythonParser implements FileParser
         $currentClass = null;
         $currentClassParents = '';
         $classIndent = null;
+        $classMethodIndent = null;
+        $ignoredScopeIndent = null;
+        $functionScopeIndent = null;
         $pendingDecorator = null;
+        $pendingPropertyAccessor = null;
 
         // Pass 1: collect nodes.
         foreach ($lines as $idx => $line) {
@@ -70,16 +74,47 @@ final class PythonParser implements FileParser
             $indent = $this->indentOf($line);
             $trim = ltrim($line);
 
+            if ($ignoredScopeIndent !== null && trim($line) !== '' && $indent <= $ignoredScopeIndent) {
+                $ignoredScopeIndent = null;
+            }
+            if ($ignoredScopeIndent !== null) {
+                continue;
+            }
+            if ($functionScopeIndent !== null && trim($line) !== '' && $indent <= $functionScopeIndent) {
+                $functionScopeIndent = null;
+            }
+            if ($currentClass !== null && $classIndent !== null && trim($line) !== '' && $indent <= $classIndent) {
+                $currentClass = null;
+                $currentClassParents = '';
+                $classIndent = null;
+                $classMethodIndent = null;
+            }
+
             if (preg_match('/^class\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?\s*:/', $trim, $m)) {
+                $isFunctionLocal = $functionScopeIndent !== null && $indent > $functionScopeIndent;
+                $isNestedClass = $currentClass !== null && $classIndent !== null && $indent > $classIndent;
+                if ($isFunctionLocal || $isNestedClass) {
+                    $ignoredScopeIndent = $indent;
+                    $pendingDecorator = null;
+                    $pendingPropertyAccessor = null;
+                    continue;
+                }
                 $currentClass = $m[1];
                 $currentClassParents = $m[2] ?? '';
                 $classIndent = $indent;
+                $classMethodIndent = null;
                 $pendingDecorator = null;
+                $pendingPropertyAccessor = null;
                 continue;
             }
 
             // Detect framework decorators (Flask, FastAPI, Click, Typer, Celery)
             if (preg_match('/^@/', $trim)) {
+                if ($trim === '@property' || preg_match('/^@[A-Za-z_][A-Za-z0-9_]*\.getter\b/', $trim)) {
+                    $pendingPropertyAccessor = 'getter';
+                } elseif (preg_match('/^@[A-Za-z_][A-Za-z0-9_]*\.(setter|deleter)\b/', $trim, $propertyMatch)) {
+                    $pendingPropertyAccessor = $propertyMatch[1];
+                }
                 $detected = $this->detectFrameworkDecorator($trim);
                 if ($detected !== null) {
                     $pendingDecorator = $detected;
@@ -97,7 +132,7 @@ final class PythonParser implements FileParser
                 continue;
             }
 
-            if (preg_match('/^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)(?:\s*->\s*(\S+))?\s*:/', $trim, $m)) {
+            if (preg_match('/^(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)(?:\s*->\s*(\S+))?\s*:/', $trim, $m)) {
                 $fn = $m[1];
 
                 // If indentation is less/equal than class indentation, we're out of the class scope.
@@ -105,10 +140,35 @@ final class PythonParser implements FileParser
                     $currentClass = null;
                     $currentClassParents = '';
                     $classIndent = null;
+                    $classMethodIndent = null;
+                }
+
+                if ($ignoredScopeIndent !== null && $indent > $ignoredScopeIndent) {
+                    $pendingDecorator = null;
+                    $pendingPropertyAccessor = null;
+                    continue;
+                }
+
+                if ($currentClass !== null && $classIndent !== null && $indent > $classIndent) {
+                    $classMethodIndent ??= $indent;
+                    if ($indent !== $classMethodIndent) {
+                        $pendingDecorator = null;
+                        $pendingPropertyAccessor = null;
+                        continue;
+                    }
+                }
+
+                $functionScopeIndent ??= $indent;
+
+                if (in_array($pendingPropertyAccessor, ['setter', 'deleter'], true)) {
+                    $pendingDecorator = null;
+                    $pendingPropertyAccessor = null;
+                    continue;
                 }
 
                 $metadata = $pendingDecorator ?? [];
                 $pendingDecorator = null;
+                $pendingPropertyAccessor = null;
 
                 // Django CBV: HTTP methods in View/ViewSet classes are implicit HTTP entrypoints.
                 // Heuristic: class name contains "View"/"ViewSet" OR parents contain a View base class.
@@ -158,28 +218,84 @@ final class PythonParser implements FileParser
         $currentDefIndent = null;
         $currentClass = null;
         $classIndent = null;
+        $classMethodIndent = null;
+        $ignoredScopeIndent = null;
+        $functionScopeIndent = null;
+        $pendingPropertyAccessor = null;
 
         foreach ($lines as $idx => $line) {
             $indent = $this->indentOf($line);
             $trim = ltrim($line);
 
+            if ($ignoredScopeIndent !== null && trim($line) !== '' && $indent <= $ignoredScopeIndent) {
+                $ignoredScopeIndent = null;
+            }
+            if ($ignoredScopeIndent !== null) {
+                continue;
+            }
+            if ($functionScopeIndent !== null && trim($line) !== '' && $indent <= $functionScopeIndent) {
+                $functionScopeIndent = null;
+            }
+            if ($currentClass !== null && $classIndent !== null && trim($line) !== '' && $indent <= $classIndent) {
+                $currentClass = null;
+                $classIndent = null;
+                $classMethodIndent = null;
+            }
+
+            if (preg_match('/^@/', $trim)) {
+                if ($trim === '@property' || preg_match('/^@[A-Za-z_][A-Za-z0-9_]*\.getter\b/', $trim)) {
+                    $pendingPropertyAccessor = 'getter';
+                } elseif (preg_match('/^@[A-Za-z_][A-Za-z0-9_]*\.(setter|deleter)\b/', $trim, $propertyMatch)) {
+                    $pendingPropertyAccessor = $propertyMatch[1];
+                }
+                continue;
+            }
+
             if (preg_match('/^class\s+([A-Za-z_][A-Za-z0-9_]*)\b/', $trim, $m)) {
+                $isFunctionLocal = $functionScopeIndent !== null && $indent > $functionScopeIndent;
+                $isNestedClass = $currentClass !== null && $classIndent !== null && $indent > $classIndent;
+                if ($isFunctionLocal || $isNestedClass) {
+                    $ignoredScopeIndent = $indent;
+                    $pendingPropertyAccessor = null;
+                    continue;
+                }
                 $currentClass = $m[1];
                 $classIndent = $indent;
+                $classMethodIndent = null;
                 $currentNodeId = null;
                 $currentDefIndent = null;
                 continue;
             }
 
-            if (preg_match('/^def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $trim, $m)) {
+            if (preg_match('/^(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $trim, $m)) {
                 $fn = $m[1];
+
+                if ($currentNodeId !== null && $currentDefIndent !== null && $indent > $currentDefIndent) {
+                    $ignoredScopeIndent = $indent;
+                    $pendingPropertyAccessor = null;
+                    continue;
+                }
 
                 if ($currentClass !== null && $classIndent !== null && $indent <= $classIndent) {
                     $currentClass = null;
                     $classIndent = null;
+                    $classMethodIndent = null;
                 }
 
+                if ($currentClass !== null && $classIndent !== null && $indent > $classIndent) {
+                    $classMethodIndent ??= $indent;
+                    if ($indent !== $classMethodIndent) {
+                        $ignoredScopeIndent = $indent;
+                        $pendingPropertyAccessor = null;
+                        continue;
+                    }
+                }
+
+                $isPropertyMutation = in_array($pendingPropertyAccessor, ['setter', 'deleter'], true);
+                $pendingPropertyAccessor = null;
+
                 $currentDefIndent = $indent;
+                $functionScopeIndent ??= $indent;
 
                 if ($indent === 0) {
                     $currentNodeId = $topLevel[$fn] ?? null;
@@ -188,6 +304,10 @@ final class PythonParser implements FileParser
                     $tmp = $this->nodeFactory->create($className, $fn, $file, ($idx + 1), 'python');
                     $currentNodeId = $tmp->id();
                 } else {
+                    $currentNodeId = null;
+                }
+
+                if ($isPropertyMutation && $currentClass === null) {
                     $currentNodeId = null;
                 }
 

@@ -55,9 +55,8 @@ final class CompareCommand implements Command
         $hash = $container->cacheHash();
         $cache = $container->reportCache();
 
-        if ($hash && $cache->isValid($hash)) {
-            $reports = $cache->load();
-        } else {
+        $reports = $hash ? $cache->loadValid($hash) : null;
+        if ($reports === null) {
             $reports = [
                 'complexity' => $container->analyzeComplexity()->execute()->toArray(),
                 'cycles' => $container->analyzeCycles()->execute()->toArray(),

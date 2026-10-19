@@ -89,6 +89,9 @@ See [System diagrams](system-diagrams.md) for diagram views, multi-project maps,
 - `cleanup <path> --keep-last=<N>`: keep the newest snapshots.
 - `architecture-gate <path> --baseline=<label> --fail-on=new`: CI-friendly local gate.
 
+For work on Flow Engine itself, `composer gate:baseline` saves `baseline-main` before changes and
+`composer gate:pr` compares the finished tree against it.
+
 ## Servers And Integrations
 
 - `api <path> [--host=127.0.0.1] [--port=8080]`: start the local read-only HTTP API.
@@ -127,5 +130,8 @@ php bin/engine.php diagram <path> --view=class > class-diagram.md
 ## Other Commands
 
 - `help`: list available commands.
+
+Native `watch` recursively monitors configured source roots, adds newly created directories, and
+periodically checks content fingerprints so missed filesystem events do not become silent gaps.
 
 The router also registers commands meant for interactive or experimental use — `interactive` (guided menu), `compare`, `simulate`, and `appmap-diff`. They are not part of this stable reference yet and may change.

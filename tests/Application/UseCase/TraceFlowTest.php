@@ -29,7 +29,7 @@ final class TraceFlowTest extends TestCase
 
         $flow = new Flow($nodes, $edges);
 
-        $repository = $this->createMock(FlowRepository::class);
+        $repository = $this->createStub(FlowRepository::class);
         $repository->method('getFlow')->willReturn($flow);
 
         return $repository;

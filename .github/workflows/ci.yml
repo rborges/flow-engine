@@ -21,6 +21,13 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           coverage: none
+          extensions: inotify
+
+      - name: Verify native watcher support
+        run: php -r 'if (!extension_loaded("inotify")) { fwrite(STDERR, "inotify extension is required by CI\n"); exit(1); }'
+
+      - name: Validate Composer metadata
+        run: composer validate --strict
 
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist

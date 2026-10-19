@@ -34,13 +34,13 @@ final class ExecutionObserverTest extends TestCase
             }
         };
 
-        $executor = $this->createMock(NodeExecutor::class);
+        $executor = $this->createStub(NodeExecutor::class);
         $executor
             ->method('execute')
             ->willReturn(42);
 
         $invoker = new FlowNodeInvoker(
-            $this->createMock(FlowRepository::class),
+            $this->createStub(FlowRepository::class),
             $executor,
             [$observer]
         );

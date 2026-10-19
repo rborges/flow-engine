@@ -53,8 +53,13 @@ final class CatalogServiceBuilder
         // Um serviço que não analisa não pode derrubar o mapa dos demais.
         try {
             $container = new Container($root, $allowReadOnlyInference);
+            $stalenessReport = $container->checkStaleness()->execute();
             $container->analyzeProject()->execute();
             $files = $container->projectFiles();
+            $warnings = $container->analysisWarnings();
+            if ($stalenessReport->stale) {
+                $warnings[] = $stalenessReport->summaryWarning();
+            }
 
             return new ServiceInfo(
                 name: $name,
@@ -66,6 +71,8 @@ final class CatalogServiceBuilder
                 configuredScanLanguages: $this->languageSupportCatalog->supportedConfiguredLanguages($container->configuredScanExtensions()),
                 detectedLanguages: $this->languageSupportCatalog->detectFromFiles($files),
                 configResolution: $container->configResolution()->toArray(),
+                analysisWarnings: array_values(array_unique($warnings)),
+                staleness: $stalenessReport->stale ? $stalenessReport->toArray() : null,
             );
         } catch (\Throwable $e) {
             // A classe distingue erro de config do projeto de bug do engine (TypeError, Error).

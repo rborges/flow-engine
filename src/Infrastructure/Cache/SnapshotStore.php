@@ -34,11 +34,7 @@ final class SnapshotStore implements SnapshotStorePort
         }
 
         $path = $this->pathFor($label);
-        $written = file_put_contents($path, $compressed);
-
-        if ($written === false) {
-            throw new RuntimeException("Failed to write snapshot: {$path}");
-        }
+        AtomicFileWriter::write($path, $compressed);
 
         if ($this->keepMax !== null) {
             $this->pruneToKeepMax();
@@ -188,7 +184,7 @@ final class SnapshotStore implements SnapshotStorePort
     private function ensureDirectory(): void
     {
         if (!is_dir($this->snapshotDir)) {
-            mkdir($this->snapshotDir, 0755, true);
+            AtomicFileWriter::ensurePrivateDirectory($this->snapshotDir);
         }
     }
 

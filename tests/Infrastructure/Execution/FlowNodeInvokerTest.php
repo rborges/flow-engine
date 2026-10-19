@@ -18,12 +18,12 @@ final class FlowNodeInvokerTest extends TestCase
     {
         $node = new Node('Calculator', 'sum', 'file.php', null);
 
-        $executor = $this->createMock(NodeExecutor::class);
+        $executor = $this->createStub(NodeExecutor::class);
         $executor
             ->method('execute')
             ->willReturn(3);
 
-        $repository = $this->createMock(FlowRepository::class);
+        $repository = $this->createStub(FlowRepository::class);
 
         $invoker = new FlowNodeInvoker($repository, $executor);
 
@@ -39,12 +39,12 @@ final class FlowNodeInvokerTest extends TestCase
     {
         $node = new Node('Calculator', 'explode', 'file.php', null);
 
-        $executor = $this->createMock(NodeExecutor::class);
+        $executor = $this->createStub(NodeExecutor::class);
         $executor
             ->method('execute')
             ->willThrowException(new RuntimeException('Boom'));
 
-        $repository = $this->createMock(FlowRepository::class);
+        $repository = $this->createStub(FlowRepository::class);
 
         $invoker = new FlowNodeInvoker($repository, $executor);
 
@@ -61,7 +61,7 @@ final class FlowNodeInvokerTest extends TestCase
         $executor = $this->createMock(NodeExecutor::class);
         $executor->expects($this->never())->method('execute');
 
-        $repository = $this->createMock(FlowRepository::class);
+        $repository = $this->createStub(FlowRepository::class);
 
         $invoker = new FlowNodeInvoker(
             $repository,
@@ -80,10 +80,10 @@ final class FlowNodeInvokerTest extends TestCase
     {
         $node = new Node('Safe', 'process', 'file.php', null);
 
-        $executor = $this->createMock(NodeExecutor::class);
+        $executor = $this->createStub(NodeExecutor::class);
         $executor->method('execute')->willReturn('ok');
 
-        $repository = $this->createMock(FlowRepository::class);
+        $repository = $this->createStub(FlowRepository::class);
 
         $invoker = new FlowNodeInvoker(
             $repository,

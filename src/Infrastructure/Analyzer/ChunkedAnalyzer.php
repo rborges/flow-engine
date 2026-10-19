@@ -4,6 +4,7 @@ namespace FlowEngine\Infrastructure\Analyzer;
 
 use FlowEngine\Domain\Flow\Flow;
 use FlowEngine\Domain\Flow\DefaultNodeFactory;
+use FlowEngine\Infrastructure\Cache\AtomicFileWriter;
 
 /**
  * Analisa projetos grandes em chunks para controlar memória.
@@ -60,7 +61,7 @@ final class ChunkedAnalyzer
         
         foreach ($chunks as $chunkIndex => $chunk) {
             $chunkNum = $chunkIndex + 1;
-            
+
             // Progress callback
             $filesProcessed = min($chunkNum * $chunkSize, $totalFiles);
             $percentage = round(($filesProcessed / $totalFiles) * 100);
@@ -82,9 +83,11 @@ final class ChunkedAnalyzer
                     // Merge edges
                     $allEdges = array_merge($allEdges, $result['edges']);
                     
-                } catch (\Exception $e) {
-                    // Skip files that fail to parse
-                    continue;
+                } catch (\Throwable $error) {
+                    throw new \RuntimeException(
+                        sprintf('Failed to parse chunk file: %s', $file),
+                        previous: $error,
+                    );
                 }
             }
             
@@ -144,30 +147,39 @@ final class ChunkedAnalyzer
     {
         $phpFiles = [];
         
-        try {
-            $iterator = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator($path, \RecursiveDirectoryIterator::SKIP_DOTS),
-                \RecursiveIteratorIterator::SELF_FIRST
-            );
-            
-            foreach ($iterator as $file) {
-                if ($file->isFile() && $file->getExtension() === 'php') {
-                    // Skip vendor e node_modules
-                    $filePath = $file->getPathname();
-                    
-                    if (strpos($filePath, '/vendor/') !== false ||
-                        strpos($filePath, '\\vendor\\') !== false ||
-                        strpos($filePath, '/node_modules/') !== false ||
-                        strpos($filePath, '\\node_modules\\') !== false) {
-                        continue;
-                    }
-                    
-                    $phpFiles[] = $filePath;
+        if (!is_dir($path) || !is_readable($path)) {
+            throw new \RuntimeException(sprintf('Chunked analysis root is not readable: %s', $path));
+        }
+
+        $directories = new \RecursiveDirectoryIterator($path, \RecursiveDirectoryIterator::SKIP_DOTS);
+        $filtered = new \RecursiveCallbackFilterIterator(
+            $directories,
+            static function (\SplFileInfo $entry): bool {
+                if (!$entry->isDir()) {
+                    return true;
                 }
+
+                if (in_array($entry->getFilename(), ['vendor', 'node_modules'], true)) {
+                    return false;
+                }
+
+                if (!is_readable($entry->getPathname())) {
+                    throw new \RuntimeException(sprintf('Chunked analysis directory is not readable: %s', $entry->getPathname()));
+                }
+
+                return true;
             }
-        } catch (\Exception $e) {
-            // Se der erro, retorna vazio
-            return [];
+        );
+        $iterator = new \RecursiveIteratorIterator(
+            $filtered,
+            \RecursiveIteratorIterator::LEAVES_ONLY,
+            \RecursiveIteratorIterator::CATCH_GET_CHILD,
+        );
+
+        foreach ($iterator as $file) {
+            if ($file->isFile() && strtolower((string) $file->getExtension()) === 'php') {
+                $phpFiles[] = $file->getPathname();
+            }
         }
         
         return $phpFiles;
@@ -180,10 +192,6 @@ final class ChunkedAnalyzer
     {
         $snapshotDir = sys_get_temp_dir() . '/flow-engine-snapshots';
         
-        if (!is_dir($snapshotDir)) {
-            mkdir($snapshotDir, 0777, true);
-        }
-        
         $snapshotFile = $snapshotDir . '/' . basename($this->projectPath) . "-chunk-{$chunkNum}-of-{$totalChunks}.json";
         
         $data = [
@@ -195,6 +203,9 @@ final class ChunkedAnalyzer
             'progress' => round(($chunkNum / $totalChunks) * 100, 1),
         ];
         
-        file_put_contents($snapshotFile, json_encode($data, JSON_PRETTY_PRINT));
+        AtomicFileWriter::write(
+            $snapshotFile,
+            json_encode($data, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR),
+        );
     }
 }

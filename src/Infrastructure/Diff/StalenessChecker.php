@@ -6,6 +6,7 @@ use FlowEngine\Application\DTO\StalenessReport;
 use FlowEngine\Domain\Contracts\ProjectContext;
 use FlowEngine\Infrastructure\Analyzer\FilesystemProjectScanner;
 use FlowEngine\Infrastructure\Cache\FlowCache;
+use FlowEngine\Infrastructure\Cache\ContentFingerprint;
 
 final class StalenessChecker
 {
@@ -17,17 +18,21 @@ final class StalenessChecker
 
     public function execute(): StalenessReport
     {
-        $saved = $this->cache->loadFileFingerprints();
-
-        if ($saved === []) {
+        if (!$this->cache->hasStalenessBaseline()) {
             return new StalenessReport(false, [], [], [], 0);
         }
+
+        $saved = $this->cache->loadFileFingerprints();
+        $savedConfigFingerprint = $this->cache->loadConfigFingerprint();
+        $configPath = rtrim($this->context->rootPath(), '/\\') . DIRECTORY_SEPARATOR . 'flow-engine.json';
+        $configChanged = $savedConfigFingerprint !== null
+            && ContentFingerprint::file($configPath) !== $savedConfigFingerprint;
 
         $currentFiles = $this->scanner->scan($this->context);
         $currentMap = [];
         foreach ($currentFiles as $file) {
             $currentMap[$file] = file_exists($file)
-                ? filemtime($file) . '|' . filesize($file)
+                ? ContentFingerprint::file($file, false)
                 : 'missing';
         }
 
@@ -53,10 +58,10 @@ final class StalenessChecker
             }
         }
 
-        $total = count($changedFiles) + count($newFiles) + count($deletedFiles);
+        $total = count($changedFiles) + count($newFiles) + count($deletedFiles) + ($configChanged ? 1 : 0);
         $stale = $total > 0;
 
-        return new StalenessReport($stale, $changedFiles, $newFiles, $deletedFiles, $total);
+        return new StalenessReport($stale, $changedFiles, $newFiles, $deletedFiles, $total, $configChanged);
     }
 
     private function isInCurrentScanScope(string $absolutePath): bool
@@ -69,7 +74,10 @@ final class StalenessChecker
         }
 
         $relative = substr($path, strlen($root) + 1);
-        if ($this->isIgnored($relative)) {
+        if (FilesystemProjectScanner::isPathIgnored(
+            $relative,
+            FilesystemProjectScanner::effectiveIgnoredPaths($this->context->ignoredPaths()),
+        )) {
             return false;
         }
 
@@ -92,20 +100,4 @@ final class StalenessChecker
         return false;
     }
 
-    private function isIgnored(string $relativePath): bool
-    {
-        $relativePath = str_replace('\\', '/', $relativePath);
-        foreach ($this->context->ignoredPaths() as $ignoredPath) {
-            $ignoredPath = str_replace('\\', '/', trim((string) $ignoredPath, "/\\"));
-            if ($ignoredPath === '') {
-                continue;
-            }
-
-            if ($relativePath === $ignoredPath || str_starts_with($relativePath, $ignoredPath . '/') || str_contains($relativePath, '/' . $ignoredPath . '/')) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }

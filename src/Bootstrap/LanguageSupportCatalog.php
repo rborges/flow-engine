@@ -91,7 +91,7 @@ final class LanguageSupportCatalog
                 'tsx' => new TypeScriptParser($nodeFactory, $projectRoot, 'typescript'),
                 'js'  => new TypeScriptParser($nodeFactory, $projectRoot, 'javascript'),
                 'jsx' => new TypeScriptParser($nodeFactory, $projectRoot, 'javascript'),
-                'go'  => new GoParser($nodeFactory),
+                'go'  => new GoParser($nodeFactory, $projectRoot),
                 'dart' => new DartParser($nodeFactory, $projectRoot),
             ],
             'compound' => [

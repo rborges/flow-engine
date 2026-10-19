@@ -4,8 +4,19 @@ namespace FlowEngine\Infrastructure\Analyzer;
 
 use FlowEngine\Domain\Contracts\ProjectContext;
 
-final class FilesystemProjectScanner implements ProjectScanner
+final class FilesystemProjectScanner implements ProjectScanner, ScanDiagnosticsProvider
 {
+    /** @var callable(string): bool */
+    private $directoryReadable;
+
+    /** @var string[] */
+    private array $warnings = [];
+
+    public function __construct(?callable $directoryReadable = null)
+    {
+        $this->directoryReadable = $directoryReadable ?? static fn(string $path): bool => is_readable($path);
+    }
+
     /**
      * Directories that should never be scanned regardless of project context.
      * These contain third-party code, build artifacts, or VCS internals that
@@ -80,12 +91,10 @@ final class FilesystemProjectScanner implements ProjectScanner
      */
     public function scan(ProjectContext $context): array
     {
+        $this->warnings = [];
         $root = $context->rootPath();
         $includes = $context->includePaths();
-        $ignored = array_values(array_unique(array_merge(
-            self::DEFAULT_IGNORED_DIRS,
-            $context->ignoredPaths(),
-        )));
+        $ignored = self::effectiveIgnoredPaths($context->ignoredPaths());
         $extensions = array_map('strtolower', $context->extensions());
 
         if ($includes === []) {
@@ -108,6 +117,10 @@ final class FilesystemProjectScanner implements ProjectScanner
                 continue;
             }
 
+            if (!(($this->directoryReadable)($base))) {
+                throw new \RuntimeException(sprintf('Configured scan root is not readable: %s', $base));
+            }
+
             if (is_file($base . DIRECTORY_SEPARATOR . 'pyvenv.cfg')) {
                 continue;
             }
@@ -121,15 +134,23 @@ final class FilesystemProjectScanner implements ProjectScanner
             // are never descended into — avoids O(n) walks over dependency trees.
             $prunedIterator = new \RecursiveCallbackFilterIterator(
                 $directoryIterator,
-                function ($current, $key, $innerIterator) use ($ignored): bool {
+                function ($current, $key, $innerIterator) use ($ignored, $root): bool {
                     if (!$current->isDir()) {
                         return true;
+                    }
+                    $relativePath = $this->relativePath($root, $current->getPathname());
+                    if (self::isPathIgnored($relativePath, $ignored)) {
+                        return false;
                     }
                     if (is_file($current->getPathname() . DIRECTORY_SEPARATOR . 'pyvenv.cfg')) {
                         return false;
                     }
-                    $subPath = $innerIterator->getSubPathname();
-                    return !$this->isPathIgnored($subPath, $ignored);
+                    if (!(($this->directoryReadable)($current->getPathname()))) {
+                        $this->warnings[] = sprintf('Skipped unreadable directory: %s', $relativePath);
+                        return false;
+                    }
+
+                    return true;
                 }
             );
 
@@ -151,7 +172,7 @@ final class FilesystemProjectScanner implements ProjectScanner
 
                 $relative = str_replace($root . DIRECTORY_SEPARATOR, '', $file->getPathname());
 
-                if ($this->isPathIgnored($relative, $ignored)) {
+                if (self::isPathIgnored($relative, $ignored)) {
                     continue;
                 }
 
@@ -163,9 +184,33 @@ final class FilesystemProjectScanner implements ProjectScanner
     }
 
     /**
+     * @param string[] $configuredPaths
+     * @return string[]
+     */
+    public static function effectiveIgnoredPaths(array $configuredPaths): array
+    {
+        return array_values(array_unique(array_merge(self::DEFAULT_IGNORED_DIRS, $configuredPaths)));
+    }
+
+    public function scanWarnings(): array
+    {
+        return array_values(array_unique($this->warnings));
+    }
+
+    private function relativePath(string $root, string $path): string
+    {
+        $root = str_replace('\\', '/', rtrim($root, '/\\'));
+        $path = str_replace('\\', '/', $path);
+
+        return str_starts_with($path, $root . '/')
+            ? substr($path, strlen($root) + 1)
+            : $path;
+    }
+
+    /**
      * @param list<string> $ignored
      */
-    private function isPathIgnored(string $relativePath, array $ignored): bool
+    public static function isPathIgnored(string $relativePath, array $ignored): bool
     {
         $relativePath = str_replace('\\', '/', $relativePath);
         foreach ($ignored as $dir) {

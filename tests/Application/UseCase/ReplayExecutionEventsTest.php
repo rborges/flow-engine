@@ -47,7 +47,7 @@ final class ReplayExecutionEventsTest extends TestCase
         ));
 
         $receivedNodeIds = [];
-        $observer = $this->createMock(ExecutionObserver::class);
+        $observer = $this->createStub(ExecutionObserver::class);
         $observer->method('notify')
             ->willReturnCallback(function (ExecutionEvent $event) use (&$receivedNodeIds) {
                 $receivedNodeIds[] = $event->type->value;
@@ -123,7 +123,7 @@ final class ReplayExecutionEventsTest extends TestCase
             ));
         }
 
-        $observer = $this->createMock(ExecutionObserver::class);
+        $observer = $this->createStub(ExecutionObserver::class);
         $replay = new ReplayExecutionEvents($store, [$observer]);
 
         $this->assertSame(5, $replay->replayAll());

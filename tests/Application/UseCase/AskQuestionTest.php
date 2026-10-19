@@ -37,7 +37,7 @@ final class AskQuestionTest extends TestCase
 
     public function test_ask_with_mock_provider(): void
     {
-        $provider = $this->createMock(LLMProvider::class);
+        $provider = $this->createStub(LLMProvider::class);
         $provider->method('isConfigured')->willReturn(true);
         $provider->method('send')->willReturn(new LLMResponse(
             content: 'The main hotspot is UserService.',
