@@ -37,12 +37,20 @@ and exits with code 1. Usage errors are plain text, not JSON.
 | `error` | only when `status` is `failed`: exception class and message |
 | `hostnames` | Docker hostnames and aliases used to resolve HTTP targets |
 | `stats.nodeCount`, `stats.edgeCount` | size of the service graph |
-| `endpoints[]` | HTTP routes found in code: `method`, `path`, `handler` (node id) |
+| `endpoints[]` | HTTP routes found in code: `method`, `path`, `handler` (node id). Laravel routes are read from the route files, see below |
 | `contract.endpointCount` | only when the catalog declares an OpenAPI contract |
 | `configResolution` | how the scan was configured: `mode` (`explicit_config` or `inferred_read_only`), `configPath`, `hasConfigFile`, `detectedContext`, `includePaths`, `ignoredPaths`, `extensions`, `warnings` |
 
 A failed service keeps its entry, with zero nodes, so the rest of the map stays usable.
 `appmap-diff` and the drift endpoints refuse maps with failed services.
+
+Routes come from nodes with `http_method`/`http_path` (FastAPI, Flask, Go, Nest/Express) and, for a
+service with `artisan` at its root, from the Laravel route files, read even when `routes/` is outside
+`scan.include`. The files and their base prefix come from `app/Providers/RouteServiceProvider.php`
+(`->group(base_path(...))` or `require base_path(...)` inside a group), else from `withRouting()` in
+`bootstrap/app.php`, else `routes/web.php` and `routes/api.php` (prefix `api`). Groups nest `prefix`,
+`namespace` and `controller`; the handler is `Controller::method`. Closure routes have no handler node
+and are left out.
 
 ## Integration Edges
 
@@ -51,6 +59,7 @@ A failed service keeps its entry, with zero nodes, so the rest of the map stays 
 | `type` | `http` (URL literal) or `script` (PHP `exec`/`shell_exec`/`system`/`passthru`/`proc_open` running a `.py` file) |
 | `fromService`, `toService` | `toService` is resolved by hostname (http) or script path (script); `null` when external or unknown |
 | `fromNode` | id of the node containing the call, see below |
+| `toNode` | id of the handler in `toService`, see below; `null` when unresolved and for `script` |
 | `fromFile`, `fromLine` | absolute path and 1-based line |
 | `target` | the raw URL or script path; there is no `metadata.url` |
 | `resolvedPath` | absolute script path when it exists; `null` for http |
@@ -63,6 +72,13 @@ outside any function it is the file node `file:<path relative to the service roo
 only when the file has no node at all (for example a URL in a class property of a file whose class has
 no methods around it). Python nodes have no end line, so a Python call is attributed to the nearest
 preceding function.
+
+`toNode` is the `handler` of the `toService` endpoint whose path matches `metadata.path` segment by
+segment: `{p}` matches any segment, `{p?}` may be missing at the end, a call segment built at runtime
+(`${id}`) matches any segment, and `metadata.httpMethod`, when present, must match. Among several, the one
+with more literal segments wins. With no endpoint and a path ending in `.php`, it is the `file:` node of
+the target whose path ends with it (legacy PHP without router). A URL with no path or just `/` gets
+`null`: it is usually a link or a base URL concatenated at runtime, not a call to the root route.
 
 `metadata.kind` is `asset` for static files (images, fonts, `css`, `js`, `map`, `ico`, `svg`, `pdf`)
 and for well-known CDNs, and `http` otherwise. Asset edges stay in `integrationEdges` but never count in
@@ -149,7 +165,8 @@ context and extensions used) or `SERVICE_FAILED`. Catalog `flow_map` repeats the
         "resolvedPath": null,
         "metadata": { "scheme": "http", "host": "billing", "port": 0, "path": "/api/invoices", "query": "", "kind": "http" },
         "fromService": "web",
-        "toService": "billing"
+        "toService": "billing",
+        "toNode": null
       }
     ],
     "serviceEdges": [

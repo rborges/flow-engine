@@ -92,7 +92,7 @@
     },
     "integrationEdge": {
       "type": "object",
-      "required": ["type", "fromNode", "fromFile", "fromLine", "target", "resolvedPath", "metadata", "fromService", "toService"],
+      "required": ["type", "fromNode", "fromFile", "fromLine", "target", "resolvedPath", "metadata", "fromService", "toService", "toNode"],
       "additionalProperties": false,
       "properties": {
         "type": { "enum": ["http", "script"] },
@@ -106,7 +106,8 @@
         "resolvedPath": { "type": ["string", "null"], "description": "Absolute script path when it exists; null for http." },
         "metadata": { "type": "object" },
         "fromService": { "type": "string" },
-        "toService": { "type": ["string", "null"], "description": "Target service resolved by hostname or script path; null when external or unknown." }
+        "toService": { "type": ["string", "null"], "description": "Target service resolved by hostname or script path; null when external or unknown." },
+        "toNode": { "type": ["string", "null"], "description": "Handler of the call in toService: the endpoint whose path matches, or the `file:` node of a legacy PHP file; null when the URL has no path or nothing matches. Always null for script." }
       },
       "if": { "properties": { "type": { "const": "http" } } },
       "then": {
