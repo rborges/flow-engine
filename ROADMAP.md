@@ -55,6 +55,26 @@ the output from another tool.
   (not `fromNodeId`), `fromFile`, `fromLine` and `metadata.path` (no `metadata.url`). No output schema
   exists yet.
 
+## Found In mapp Integration (2026-10-20)
+
+Gaps seen while consuming the appmap from a cross-system catalog tool. Not prioritized yet.
+
+- **Endpoints beyond the decorator-based frameworks.** Flask/FastAPI and Nest decorators, Go routers
+  and PHP route attributes already set `http_path`; Laravel route files reach `services[].endpoints`
+  since `faa9dfa`. Still missing: Django `urls.py`, Express-style `app.get('/x', handler)` registrations
+  and Java/Spring (no Java analyzer), so calls into those services cannot be matched to a handler node.
+- **Orphan suppression from external callers.** A route called only by another system is reported as
+  an orphan. Accept a list of externally called routes or nodes (e.g. from the appmap or a catalog)
+  and suppress those candidates, with the caller as evidence.
+- **appmap v2: data and env edges.** Emit edges for SQL table/procedure access and for URLs read from
+  environment variables, so consumers stop reimplementing URL and SQL detection with diverging rules.
+  URLs written in configuration files (`.env` examples, Laravel `config/*.php`, `.ini`) are emitted
+  since the config-file pass (`metadata.source = "config"`); variables read in code are still open.
+- **Schedule in script topology.** Crontab entries are recognized; expose schedule and command per
+  entry so a consumer can attach "when it runs" to a job.
+- **Stable evidence anchors.** Document node ids as the stable anchor for edge evidence (file and
+  line change on every edit) and keep them stable across releases.
+
 ## Longer-Term Public Work
 
 - More deterministic reports
