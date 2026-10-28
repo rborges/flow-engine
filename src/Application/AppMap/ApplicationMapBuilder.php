@@ -124,8 +124,10 @@ final class ApplicationMapBuilder
         // Service-level dependency graph
         $serviceEdges = [];
         foreach ($edges as $e) {
-            // Asset servido por outro serviço não é dependência entre serviços.
-            if (!isset($e['toService']) || $e['toService'] === null || ($e['metadata']['kind'] ?? null) === 'asset') {
+            // Asset servido por outro serviço não é dependência entre serviços; linha comentada de `.env` de
+            // exemplo é valor de outro ambiente.
+            if (!isset($e['toService']) || $e['toService'] === null || ($e['metadata']['kind'] ?? null) === 'asset'
+                || ($e['metadata']['commented'] ?? false) === true) {
                 continue;
             }
 

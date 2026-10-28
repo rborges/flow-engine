@@ -85,6 +85,29 @@ and for well-known CDNs, and `http` otherwise. Asset edges stay in `integrationE
 `serviceEdges`. URLs inside comments, docblocks and Python docstrings are ignored. URLs are detected in
 PHP, Dart, Python, TypeScript/JavaScript and Go.
 
+### URLs in configuration files
+
+Configuration files are read from the service root even when they are outside the scan: `.env`
+examples (`.env.example`, `.env.dist`, `.env.sample`, `.env.<name>.example`; never `.env` or
+`.env.<environment>`), `config/*.php` of a Laravel app (a folder next to `artisan`) and `*.ini`.
+Hidden folders (worktrees included) and dependency, build, cache and test folders are skipped, and a
+file already in the scan is not read twice. These edges have:
+
+- `metadata.source`: `config`;
+- `metadata.configKey`: the variable or key of the line (for `env('X', ...)` in PHP, `X`), when there is one;
+- `metadata.commented`: `true` for a commented line of an `.env` example, which usually holds the value
+  of another environment; these edges never count in `serviceEdges`. Comments in PHP and `.ini` are
+  ignored;
+- `fromNode`: `file:<path relative to the service root>`;
+- `target`, `path` and `query`: only scheme, host and port are kept, with an empty path and query,
+  because paths and queries in configuration often carry secrets (webhook paths, tokens). `kind` is
+  computed from the real path before it is dropped.
+
+A line is skipped when a word of its key names a secret (`PASS`, `CREDENTIAL`, or a word ending in `KEY`,
+`SECRET`, `TOKEN`, `PASSWORD`, `PWD`), unless another word says it is an address (`URL`, `URI`,
+`ENDPOINT`, `HOST`), as in `AUTH_URL_TOKEN`. `PASSPORT_SERVER` and `KEYCLOAK_BASE` are not secrets.
+A comma ends a URL (lists of origins), and a host built by interpolation (`${APP_HOST}`) is ignored.
+
 ## Service Edges
 
 `{from, to, type, count}`: one entry per service pair and edge type, counting the non-asset
