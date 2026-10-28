@@ -10,6 +10,7 @@ final class IntegrationDetector
     private NodeLocator $locator;
     private CommentStripper $commentStripper;
     private UrlClassifier $urlClassifier;
+    private ConfigUrlDetector $configUrls;
 
     /** @var string[] */
     private array $sourceExtensions = [];
@@ -19,6 +20,7 @@ final class IntegrationDetector
         $this->locator = $locator ?? new NodeLocator();
         $this->commentStripper = new CommentStripper();
         $this->urlClassifier = new UrlClassifier();
+        $this->configUrls = new ConfigUrlDetector();
 
         foreach (($languageCatalog ?? new LanguageSupportCatalog())->entries() as $entry) {
             array_push($this->sourceExtensions, ...$entry['extensions']);
@@ -34,12 +36,14 @@ final class IntegrationDetector
     public function detect(Flow $flow, string $projectRoot, array $files): array
     {
         $calls = [];
+        $read = [];
 
         foreach ($files as $file) {
             $extension = strtolower((string) pathinfo($file, PATHINFO_EXTENSION));
             if (!in_array($extension, $this->sourceExtensions, true)) {
                 continue;
             }
+            $read[] = $file;
 
             $content = @file_get_contents($file);
             if ($content === false) {
@@ -133,6 +137,8 @@ final class IntegrationDetector
                 }
             }
         }
+
+        array_push($calls, ...$this->configUrls->detect($projectRoot, $read));
 
         return $calls;
     }

@@ -181,4 +181,25 @@ final class ApplicationMapBuilderTest extends TestCase
         );
         self::assertSame([['from' => 'web', 'to' => 'cdn', 'type' => 'http', 'count' => 1]], $map['serviceEdges']);
     }
+
+    public function test_commented_config_edges_stay_in_integration_edges_but_not_in_service_edges(): void
+    {
+        $base = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow-engine-appmap-config-' . uniqid();
+        mkdir($base . DIRECTORY_SEPARATOR . 'web', 0777, true);
+        mkdir($base . DIRECTORY_SEPARATOR . 'api', 0777, true);
+        file_put_contents(
+            $base . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '.env.example',
+            "API_URL=http://api-interna
+# API_URL=http://api-prod
+"
+        );
+
+        $web = new ServiceInfo('web', $base . DIRECTORY_SEPARATOR . 'web', new Flow([], []), []);
+        $api = new ServiceInfo('api', $base . DIRECTORY_SEPARATOR . 'api', new Flow([], []), [], ['api-interna', 'api-prod']);
+
+        $map = (new ApplicationMapBuilder())->build([$web, $api]);
+
+        self::assertSame(['api-interna', 'api-prod'], array_map(fn(array $e) => $e['metadata']['host'], $map['integrationEdges']));
+        self::assertSame([['from' => 'web', 'to' => 'api', 'type' => 'http', 'count' => 1]], $map['serviceEdges']);
+    }
 }

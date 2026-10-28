@@ -98,7 +98,7 @@
         "type": { "enum": ["http", "script"] },
         "fromNode": {
           "type": "string",
-          "description": "Id of the node containing the line: method or function, `file:<relative path>` for procedural PHP outside any function, `::unknown` when the file has no node."
+          "description": "Id of the node containing the line: method or function, `file:<relative path>` for procedural PHP outside any function and for configuration files, `::unknown` when the file has no node."
         },
         "fromFile": { "type": "string", "description": "Absolute path." },
         "fromLine": { "type": "integer", "minimum": 1 },
@@ -122,7 +122,10 @@
               "path": { "type": "string" },
               "query": { "type": "string" },
               "kind": { "enum": ["http", "asset"], "description": "asset: static file or well-known CDN; never counted in serviceEdges." },
-              "httpMethod": { "type": "string", "description": "Only when the call site names it (Dart)." }
+              "httpMethod": { "type": "string", "description": "Only when the call site names it (Dart)." },
+              "source": { "const": "config", "description": "Present when the URL was read from a configuration file; path and query are then empty." },
+              "configKey": { "type": "string", "description": "Variable or key of the configuration line." },
+              "commented": { "const": true, "description": "Commented line of an .env example; never counted in serviceEdges." }
             }
           }
         }
