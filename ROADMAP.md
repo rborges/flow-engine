@@ -75,6 +75,29 @@ Gaps seen while consuming the appmap from a cross-system catalog tool. Not prior
 - **Stable evidence anchors.** Document node ids as the stable anchor for edge evidence (file and
   line change on every edit) and keep them stable across releases.
 
+## Found In Real Use (2026-11-12)
+
+Seen while analyzing a small Python repository (about 1,900 lines, no framework): seven top-level scripts
+that loop forever and call methods of a few classes. 125 nodes, 208 edges.
+
+- **Python complexity is always 1.** `complexity` reported 125 of 125 methods as `LOW` with
+  `maxComplexity: 1`, including a 70-line method with nested `try`/`if` and fan-out 17. Branches are not
+  counted for Python; `complexityScore` in `metrics` ends up being fan-out times three.
+- **No entrypoints for script repositories.** `entrypoints` returned zero actionable out of 107 raw.
+  A module with top-level statements (`while True:`, `if __name__ == "__main__":`) that is the command
+  of a Dockerfile or compose service is an entrypoint.
+- **Orphans: 77.6% false positives.** Calls on a freshly constructed instance (`Repo().method()`),
+  methods passed as callbacks (`run(self._handler)`), `@staticmethod`/`@classmethod` called through the
+  class and calls from top-level module code are not resolved, so methods that are called show
+  `fanIn: 0` and `safeToRemove: true`. With no entrypoints detected, the orphan report should say so
+  instead of listing most of the code base.
+- **`python_missing_return_type` drowns the bug report.** 75 of 76 findings were this type, in a
+  project whose mypy run is clean. Make it opt-in or `INFO`, out of the default total.
+- **`architecture` says clean when nothing was classified.** All 125 nodes were in layer `Unknown` and
+  the result was `isClean: true`. Report "not evaluated" when no node maps to a layer.
+- **`bugs` prints text by default, the other analysis commands print JSON.** A consumer has to know to
+  pass `--format=json` for this one command.
+
 ## Longer-Term Public Work
 
 - More deterministic reports
