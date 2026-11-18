@@ -2,19 +2,28 @@
 
 namespace FlowEngine\Application\AppMap;
 
+use FlowEngine\Application\EngineVersion;
+
 final class ApplicationMapBuilder
 {
+    public const SCHEMA_VERSION = '2.0';
+
     private const TRAILING_PARAM = '{/}';
 
     private IntegrationDetector $detector;
     private LaravelRouteCollector $laravelRoutes;
+    private GitRevisionReader $revisions;
     /** @var array<string, array<string, string>> */
     private array $fileNodes = [];
 
-    public function __construct(?IntegrationDetector $detector = null, ?LaravelRouteCollector $laravelRoutes = null)
-    {
+    public function __construct(
+        ?IntegrationDetector $detector = null,
+        ?LaravelRouteCollector $laravelRoutes = null,
+        ?GitRevisionReader $revisions = null,
+    ) {
         $this->detector = $detector ?? new IntegrationDetector();
         $this->laravelRoutes = $laravelRoutes ?? new LaravelRouteCollector();
+        $this->revisions = $revisions ?? new GitRevisionReader();
     }
 
     /**
@@ -23,6 +32,8 @@ final class ApplicationMapBuilder
      */
     public function build(array $services): array
     {
+        usort($services, static fn (ServiceInfo $a, ServiceInfo $b): int => strcmp($a->name, $b->name));
+
         $serviceByRoot = [];
         $fileIndex = [];
         $hostnameToService = [];
@@ -121,6 +132,10 @@ final class ApplicationMapBuilder
             }
         }
 
+        usort($edges, static fn (array $a, array $b): int =>
+            [$a['fromService'], $a['fromFile'], $a['fromLine'], $a['type'], $a['target']]
+            <=> [$b['fromService'], $b['fromFile'], $b['fromLine'], $b['type'], $b['target']]);
+
         // Service-level dependency graph
         $serviceEdges = [];
         foreach ($edges as $e) {
@@ -141,9 +156,11 @@ final class ApplicationMapBuilder
 
             $serviceEdges[$key]['count']++;
         }
+        usort($serviceEdges, static fn (array $a, array $b): int =>
+            [$a['from'], $a['to'], $a['type']] <=> [$b['from'], $b['to'], $b['type']]);
 
         $serviceArrays = array_map(function (ServiceInfo $s) use (&$inconsistencies, $endpoints): array {
-            $arr = $s->toArray();
+            $arr = $s->toArray() + $this->revisions->read($s->root);
 
             $codeEndpoints = $endpoints[$s->name];
             $arr['endpoints'] = $codeEndpoints;
@@ -159,7 +176,12 @@ final class ApplicationMapBuilder
             return $arr;
         }, $services);
 
+        usort($inconsistencies, static fn (array $a, array $b): int =>
+            [$a['type'], json_encode($a)] <=> [$b['type'], json_encode($b)]);
+
         return [
+            'schemaVersion'    => self::SCHEMA_VERSION,
+            'sourceVersion'    => EngineVersion::VALUE,
             'generatedAt'      => date('c'),
             'services'         => $serviceArrays,
             'integrationEdges' => $edges,
@@ -247,7 +269,19 @@ final class ApplicationMapBuilder
             }
         }
 
+        // A ordem dos nós segue o scanner; sem ordenar, o empate em bestEndpoint muda o toNode entre máquinas.
+        // Chamada sem método empata entre os verbos da mesma rota: GET vem antes, nunca DELETE por ordem alfabética.
+        usort($endpoints, static fn (array $a, array $b): int =>
+            [$a['path'], self::methodRank($a['method']), $a['handler']] <=> [$b['path'], self::methodRank($b['method']), $b['handler']]);
+
         return $endpoints;
+    }
+
+    private static function methodRank(string $method): string
+    {
+        $rank = array_search(strtoupper($method), ['GET', 'ANY', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], true);
+
+        return $rank === false ? '9' . strtoupper($method) : (string) $rank;
     }
 
     /**

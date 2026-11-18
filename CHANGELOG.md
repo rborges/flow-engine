@@ -2,6 +2,9 @@
 
 ## Unreleased - Reliability hardening
 
+- appmap v2 (`appmap-output.schema.v2.json`; v1 kept for older maps): `appmap.schemaVersion` (`"2.0"`) and `appmap.sourceVersion` (engine version, the same the MCP server reports), and per service `repository` (`origin` remote without user or password) and `commitSha` (`HEAD`), both `null` without git. Services, endpoints, integration edges, service edges and inconsistencies come in a fixed order, so two runs over the same commits differ only in `generatedAt`. Consumers validating against v1 reject v2 maps. Order changes: a call matching two endpoints equally resolves `toNode` to the first by path, method (`GET` before `ANY`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`) and handler, and two services declaring the same hostname resolve to the first by name, so the first `appmap-diff` after upgrading may report moved `toNode` and `toService` values. git is resolved from absolute `PATH` entries only and run only by `appmap` and `GET /api/v1/appmap`; the other builders of the map do not run it.
+- The ROADMAP item for SQL and environment-variable edges is dropped: mapp owns that detection (mapp ADR-0004).
+
 - Pruned ignored directories before recursive descent, reported unreadable source directories, and kept explicitly configured unreadable roots as hard failures.
 - Replaced timestamp-and-size cache keys with content fingerprints, included all graph-producing code and installed dependency metadata in cache validity, rejected source changes during analysis, added private state directories, made multi-file caches transactional, and made corrupt or structurally invalid flow, per-file, and report payloads recover as cache misses.
 - Made MCP project preparation refresh stale caches before returning results and propagate source-file and `flow-engine.json` refreshes, corruption, duplicate-ID, and unreadable-directory warnings through every code-analysis project tool.

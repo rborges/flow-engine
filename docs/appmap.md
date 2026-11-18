@@ -1,8 +1,10 @@
 # Application Map Output
 
 `appmap` (CLI) and `GET /api/v1/appmap` (local API) return the same payload. Its contract is
-[`appmap-output.schema.v1.json`](../appmap-output.schema.v1.json) (JSON Schema 2020-12), and a test
+[`appmap-output.schema.v2.json`](../appmap-output.schema.v2.json) (JSON Schema 2020-12), and a test
 validates real output against it, so a format change fails CI before it reaches a consumer.
+[`appmap-output.schema.v1.json`](../appmap-output.schema.v1.json) stays to validate maps produced before v2,
+which have no `schemaVersion`.
 
 ```bash
 php bin/engine.php appmap <service-a> <service-b>
@@ -17,7 +19,9 @@ and exits with code 1. Usage errors are plain text, not JSON.
 | Field | Type | Notes |
 |---|---|---|
 | `status` | `"ok"` | |
-| `appmap.generatedAt` | ISO 8601 string | |
+| `appmap.schemaVersion` | `"2.0"` | version of this contract; a consumer refuses a major version it does not know |
+| `appmap.sourceVersion` | string | version of the engine that produced the map (the MCP server reports the same) |
+| `appmap.generatedAt` | ISO 8601 string | the only field that changes between two runs over the same commits |
 | `appmap.services` | array | one entry per analyzed service |
 | `appmap.integrationEdges` | array | every call site found, including unresolved and asset ones |
 | `appmap.serviceEdges` | array | service-to-service dependencies aggregated from `integrationEdges` |
@@ -30,6 +34,8 @@ and exits with code 1. Usage errors are plain text, not JSON.
 |---|---|
 | `id`, `name` | service name (same value) |
 | `root` | absolute path |
+| `repository` | URL of the `origin` remote of the repository containing `root`, without user or password; `null` without git, without `origin`, or when git refuses the repository (owned by another user) |
+| `commitSha` | `HEAD` of that repository; uncommitted changes are not reflected; `null` without git or without commits |
 | `languages`, `technology` | languages of the scanned files; `technology` is the first one or `"unknown"` |
 | `domain` | base name of the root directory |
 | `kind`, `external` | always `"service"` and `false` |
@@ -108,6 +114,20 @@ A line is skipped when a word of its key names a secret (`PASS`, `CREDENTIAL`, o
 `ENDPOINT`, `HOST`), as in `AUTH_URL_TOKEN`. `PASSPORT_SERVER` and `KEYCLOAK_BASE` are not secrets.
 A comma ends a URL (lists of origins), and a host built by interpolation (`${APP_HOST}`) is ignored.
 
+## Order
+
+Arrays come in a fixed order, so two runs over the same commits differ only in `generatedAt`: services by
+name; `endpoints` by path, method (`GET`, `ANY`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, then
+the others) and handler; `integrationEdges` by `fromService`, `fromFile`, `fromLine`,
+`type` and `target`; `serviceEdges` by `from`, `to` and `type`; `inconsistencies` by type and content;
+`warnings` follow the services. When two endpoints match a call equally, `toNode` is the first in this order,
+so a call that does not name its method resolves to `GET` before `DELETE`. Two services declaring the same
+hostname resolve to the first by name.
+
+`repository` and `commitSha` are read only by the commands that publish this payload (`appmap` and
+`GET /api/v1/appmap`); `diagram`, `context`, the other API endpoints and the MCP tools build the map without
+running git.
+
 ## Service Edges
 
 `{from, to, type, count}`: one entry per service pair and edge type, counting the non-asset
@@ -136,12 +156,33 @@ context and extensions used) or `SERVICE_FAILED`. Catalog `flow_map` repeats the
 {
   "status": "ok",
   "appmap": {
+    "schemaVersion": "2.0",
+    "sourceVersion": "4.44.3",
     "generatedAt": "2026-10-16T10:00:00-03:00",
     "services": [
+      {
+        "id": "billing",
+        "name": "billing",
+        "root": "/repos/billing",
+        "repository": null,
+        "commitSha": null,
+        "languages": [],
+        "technology": "unknown",
+        "domain": "billing",
+        "kind": "service",
+        "external": false,
+        "status": "failed",
+        "error": "LogicException: Unsupported project context: rails",
+        "hostnames": ["billing"],
+        "stats": { "nodeCount": 0, "edgeCount": 0 },
+        "endpoints": []
+      },
       {
         "id": "web",
         "name": "web",
         "root": "/repos/web",
+        "repository": "https://bitbucket.org/example/web.git",
+        "commitSha": "4120212f6a7d3c1e9b0a5d8c2e7f1b3a9c6d0e4f",
         "languages": ["php"],
         "technology": "php",
         "domain": "web",
@@ -161,21 +202,6 @@ context and extensions used) or `SERVICE_FAILED`. Catalog `flow_map` repeats the
           "extensions": ["php"],
           "warnings": []
         }
-      },
-      {
-        "id": "billing",
-        "name": "billing",
-        "root": "/repos/billing",
-        "languages": [],
-        "technology": "unknown",
-        "domain": "billing",
-        "kind": "service",
-        "external": false,
-        "status": "failed",
-        "error": "LogicException: Unsupported project context: rails",
-        "hostnames": ["billing"],
-        "stats": { "nodeCount": 0, "edgeCount": 0 },
-        "endpoints": []
       }
     ],
     "integrationEdges": [

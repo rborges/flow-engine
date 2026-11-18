@@ -4,6 +4,7 @@ namespace FlowEngine\Application\CLI\Command;
 
 use FlowEngine\AI\Export\FlowDiagramGenerator;
 use FlowEngine\Application\AppMap\ApplicationMapBuilder;
+use FlowEngine\Application\AppMap\GitRevisionReader;
 use FlowEngine\Application\AppMap\MermaidDiagramGenerator;
 use FlowEngine\Bootstrap\CatalogServiceBuilder;
 use FlowEngine\Bootstrap\Container;
@@ -131,7 +132,7 @@ final class DiagramCommand implements Command
             $entries
         ));
 
-        $appmap    = (new ApplicationMapBuilder())->build($services);
+        $appmap    = (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build($services);
         $generator = new MermaidDiagramGenerator();
         $mermaid   = match ($type) {
             'sequence'    => $generator->sequenceDiagram($appmap),

@@ -4,7 +4,9 @@ namespace FlowEngine\Application\MCP;
 
 use FlowEngine\AI\Export\ExportOptions;
 use FlowEngine\Application\AppMap\ApplicationMapBuilder;
+use FlowEngine\Application\AppMap\GitRevisionReader;
 use FlowEngine\Application\DTO\StalenessReport;
+use FlowEngine\Application\EngineVersion;
 use FlowEngine\Application\InfraMap\InfraMapBuilder;
 use FlowEngine\Application\ProjectMap\ProjectFindBuilder;
 use FlowEngine\Application\ProjectMap\ProjectLookupBuilder;
@@ -22,7 +24,7 @@ final class McpServer
 {
     private const PROTOCOL_VERSION = '2025-03-26';
     private const SERVER_NAME      = 'flow-engine';
-    private const SERVER_VERSION   = '4.44.3';
+    private const SERVER_VERSION   = EngineVersion::VALUE;
     private const NODE_ID_DESCRIPTION =
         'Node identifier as returned by flow_map or flow_find. PHP uses `Namespace\\Class::method` (no prefix); '
         . 'every other code language prefixes the id, in the form `<lang>:<module.path>[.<Class>]::<member>` '
@@ -241,7 +243,7 @@ final class McpServer
                     if ($scope === 'catalog') {
                         $catalogPath = $this->normalizeCatalogPath((string) ($args['catalog'] ?? ''));
                         $services = (new CatalogServiceBuilder())->buildServices($catalogPath, true);
-                        $appmap = (new ApplicationMapBuilder())->build($services);
+                        $appmap = (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build($services);
                         $capabilities = $this->catalogCapabilities($languageSupportCatalog, $services);
                         $payload = $builder->buildForCatalog($catalogPath, $appmap, $services, $capabilities, $mode, $depth, $extraWarnings)->toArray();
 
@@ -440,7 +442,7 @@ DESC . ' ' . $supportSummary,
                         if ($scope === 'catalog') {
                             $catalogPath = $this->normalizeCatalogPath((string) ($args['catalog'] ?? ''));
                             $services = (new CatalogServiceBuilder())->buildServices($catalogPath, true);
-                            $appmap = (new ApplicationMapBuilder())->build($services);
+                            $appmap = (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build($services);
 
                             // Expand "all" for catalog
                             if ($resolvedTargets === null) {
@@ -520,7 +522,7 @@ DESC . ' ' . $supportSummary,
                     if ($scope === 'catalog') {
                         $catalogPath = $this->normalizeCatalogPath((string) ($args['catalog'] ?? ''));
                         $services = (new CatalogServiceBuilder())->buildServices($catalogPath, true);
-                        $appmap = (new ApplicationMapBuilder())->build($services);
+                        $appmap = (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build($services);
                         $result = $builder->lookupCatalog($catalogPath, $appmap, $services, $targetType, $target, $format, $depth);
                         if (is_string($result)) {
                             return $this->prefixCatalogFallbackNote($result, $services);

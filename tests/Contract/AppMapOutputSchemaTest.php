@@ -30,7 +30,13 @@ final class AppMapOutputSchemaTest extends TestCase
             \RecursiveIteratorIterator::CHILD_FIRST
         );
         foreach ($items as $item) {
-            $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+            if ($item->isDir()) {
+                rmdir($item->getPathname());
+                continue;
+            }
+            // Objetos do git são somente leitura; no Windows o unlink falha sem isso.
+            chmod($item->getPathname(), 0666);
+            unlink($item->getPathname());
         }
         rmdir($this->tmpDir);
     }
@@ -65,7 +71,7 @@ PHP,
 
         (new AppMapCommand($io))->handle(['bin/engine.php', 'appmap', $web, $jobs, $empty, $broken]);
 
-        $this->assertValid($payload, 'appmap-output.schema.v1.json');
+        $this->assertValid($payload, 'appmap-output.schema.v2.json');
 
         $edges = $payload['appmap']['integrationEdges'];
         self::assertEqualsCanonicalizing(['http', 'script'], array_values(array_unique(array_column($edges, 'type'))));
@@ -77,19 +83,72 @@ PHP,
 
     public function test_schema_rejects_an_undocumented_field(): void
     {
-        $payload = ['status' => 'ok', 'appmap' => [
+        $payload = $this->emptyMap();
+        $this->assertValid($payload, 'appmap-output.schema.v2.json');
+
+        $payload['appmap']['version'] = 2;
+        $result = (new Validator())->validate($this->toObject($payload), $this->schema('appmap-output.schema.v2.json'));
+
+        self::assertFalse($result->isValid());
+    }
+
+    public function test_v2_schema_rejects_a_v1_map_and_v1_rejects_a_v2_map(): void
+    {
+        $v2 = $this->emptyMap();
+        $v1 = $v2;
+        unset($v1['appmap']['schemaVersion'], $v1['appmap']['sourceVersion']);
+
+        $this->assertValid($v1, 'appmap-output.schema.v1.json');
+        self::assertFalse((new Validator())->validate($this->toObject($v1), $this->schema('appmap-output.schema.v2.json'))->isValid());
+        self::assertFalse((new Validator())->validate($this->toObject($v2), $this->schema('appmap-output.schema.v1.json'))->isValid());
+    }
+
+    public function test_real_output_carries_contract_and_engine_versions(): void
+    {
+        $web = $this->service('web', 'composer', ['php'], ['src/a.php' => "<?php\n"]);
+        $jobs = $this->service('jobs', 'python', ['py'], ['src/b.py' => "def f():\n    return 1\n"]);
+        $git = static function (string ...$args) use ($web): string {
+            exec('git -C ' . escapeshellarg($web) . ' ' . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1', $out, $code);
+            self::assertSame(0, $code, implode("\n", $out));
+
+            return trim(implode("\n", $out));
+        };
+        $git('init', '--quiet');
+        $git('add', '.');
+        $git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=', 'commit', '--quiet', '-m', 'init');
+        $git('remote', 'add', 'origin', 'https://someone:secret-token@git.example.invalid/team/web.git');
+
+        $payload = null;
+        $io = $this->createStub(ConsoleIO::class);
+        $io->method('json')->willReturnCallback(function (array $data) use (&$payload): void {
+            $payload = $data;
+        });
+        (new AppMapCommand($io))->handle(['bin/engine.php', 'appmap', $web, $jobs]);
+
+        self::assertSame('2.0', $payload['appmap']['schemaVersion']);
+        self::assertSame(\FlowEngine\Application\EngineVersion::VALUE, $payload['appmap']['sourceVersion']);
+        $this->assertValid($payload, 'appmap-output.schema.v2.json');
+        $services = array_column($payload['appmap']['services'], null, 'name');
+        self::assertSame('https://git.example.invalid/team/web.git', $services['web']['repository']);
+        self::assertSame($git('rev-parse', 'HEAD'), $services['web']['commitSha']);
+        self::assertNull($services['jobs']['commitSha']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function emptyMap(): array
+    {
+        return ['status' => 'ok', 'appmap' => [
+            'schemaVersion' => '2.0',
+            'sourceVersion' => '4.44.3',
             'generatedAt' => date('c'),
             'services' => [],
             'integrationEdges' => [],
             'serviceEdges' => [],
             'inconsistencies' => [],
             'warnings' => [],
-            'version' => 2,
         ]];
-
-        $result = (new Validator())->validate($this->toObject($payload), $this->schema('appmap-output.schema.v1.json'));
-
-        self::assertFalse($result->isValid());
     }
 
     public function test_documented_appmap_example_matches_the_schema(): void
@@ -97,7 +156,7 @@ PHP,
         $markdown = (string) file_get_contents(self::ROOT . '/docs/appmap.md');
         self::assertSame(1, preg_match('/```json\n(.*?)\n```/s', $markdown, $m), 'docs/appmap.md must have a JSON example');
 
-        $this->assertValid(json_decode($m[1], true, 512, JSON_THROW_ON_ERROR), 'appmap-output.schema.v1.json');
+        $this->assertValid(json_decode($m[1], true, 512, JSON_THROW_ON_ERROR), 'appmap-output.schema.v2.json');
     }
 
     public function test_catalog_fixture_matches_the_service_catalog_schema(): void

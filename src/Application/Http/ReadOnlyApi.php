@@ -6,6 +6,7 @@ use FlowEngine\AI\Export\ExportOptions;
 use FlowEngine\Application\AppMap\AppMapDiffAnalyzer;
 use FlowEngine\Application\AppMap\AppMapDriftPolicyEvaluator;
 use FlowEngine\Application\AppMap\ApplicationMapBuilder;
+use FlowEngine\Application\AppMap\GitRevisionReader;
 use FlowEngine\Application\AppMap\ComplianceMonitorEvaluator;
 use FlowEngine\Application\AppMap\MermaidDiagramGenerator;
 use FlowEngine\Application\AppMap\ServiceInfo;
@@ -419,7 +420,7 @@ final class ReadOnlyApi
         }
 
         $services = $this->buildServices($entries);
-        $appmap = (new ApplicationMapBuilder())->build($services);
+        $appmap = (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build($services);
         $generator = new MermaidDiagramGenerator();
         $mermaid = match ($type) {
             'sequence' => $generator->sequenceDiagram($appmap),
@@ -456,7 +457,7 @@ final class ReadOnlyApi
         }
 
         $services = $this->buildServices($entries);
-        $appmap = (new ApplicationMapBuilder())->build($services);
+        $appmap = (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build($services);
 
         $docker = $resolved['docker'];
         $deployment = $this->buildDeploymentPayload($appmap, $docker, $catalog);
@@ -497,7 +498,7 @@ final class ReadOnlyApi
         }
 
         $services = $this->buildServices($entries);
-        $appmap = (new ApplicationMapBuilder())->build($services);
+        $appmap = (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build($services);
 
         $inconsistencies = is_array($appmap['inconsistencies'] ?? null)
             ? $appmap['inconsistencies']
@@ -974,7 +975,7 @@ final class ReadOnlyApi
         }
 
         $services = $this->buildServices($entries);
-        return (new ApplicationMapBuilder())->build($services);
+        return (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build($services);
     }
 
     /**
