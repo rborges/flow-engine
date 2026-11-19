@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flow-engine.dev/schema/appmap-output.v2.json",
+  "title": "Flow Engine appmap output (v2)",
+  "description": "Payload of `appmap` (CLI) and GET /api/v1/appmap: services, the integrations found between them and what looked inconsistent. Arrays come in a fixed order, so two runs over the same commits differ only in generatedAt.",
+  "type": "object",
+  "required": ["status", "appmap"],
+  "additionalProperties": false,
+  "properties": {
+    "status": { "const": "ok" },
+    "appmap": { "$ref": "#/$defs/appmap" }
+  },
+  "$defs": {
+    "appmap": {
+      "type": "object",
+      "required": ["schemaVersion", "sourceVersion", "generatedAt", "services", "integrationEdges", "serviceEdges", "inconsistencies", "warnings"],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": { "const": "2.0", "description": "Version of this contract. A consumer refuses a major version it does not know." },
+        "sourceVersion": { "type": "string", "description": "Version of the engine that produced the map." },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "services": { "type": "array", "items": { "$ref": "#/$defs/service" } },
+        "integrationEdges": { "type": "array", "items": { "$ref": "#/$defs/integrationEdge" } },
+        "serviceEdges": { "type": "array", "items": { "$ref": "#/$defs/serviceEdge" } },
+        "inconsistencies": { "type": "array", "items": { "$ref": "#/$defs/inconsistency" } },
+        "warnings": { "type": "array", "items": { "$ref": "#/$defs/warning" } }
+      }
+    },
+    "service": {
+      "type": "object",
+      "required": ["id", "name", "root", "repository", "commitSha", "languages", "technology", "domain", "kind", "external", "status", "hostnames", "stats", "endpoints"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Same as name." },
+        "name": { "type": "string" },
+        "root": { "type": "string", "description": "Absolute path of the service root." },
+        "repository": { "type": ["string", "null"], "description": "URL of the `origin` remote of the repository containing the root, without user or password; null without git, without origin, or when git refuses the repository." },
+        "commitSha": { "type": ["string", "null"], "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$", "description": "HEAD of that repository; uncommitted changes are not reflected. null without git or without commits." },
+        "languages": { "type": "array", "items": { "type": "string" } },
+        "technology": { "type": "string", "description": "First language, or \"unknown\"." },
+        "domain": { "type": "string", "description": "Base name of the root directory." },
+        "kind": { "const": "service" },
+        "external": { "const": false },
+        "status": { "enum": ["ok", "failed"] },
+        "error": { "type": "string", "description": "Present only when status is failed: exception class and message." },
+        "hostnames": { "type": "array", "items": { "type": "string" } },
+        "stats": {
+          "type": "object",
+          "required": ["nodeCount", "edgeCount"],
+          "additionalProperties": false,
+          "properties": {
+            "nodeCount": { "type": "integer", "minimum": 0 },
+            "edgeCount": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["method", "path", "handler"],
+            "additionalProperties": false,
+            "properties": {
+              "method": { "type": "string" },
+              "path": { "type": "string" },
+              "handler": { "type": "string", "description": "Node id of the handler." }
+            }
+          }
+        },
+        "contract": {
+          "type": "object",
+          "description": "Present when the catalog declares an OpenAPI contract for the service.",
+          "required": ["endpointCount"],
+          "additionalProperties": false,
+          "properties": { "endpointCount": { "type": "integer", "minimum": 0 } }
+        },
+        "configResolution": {
+          "type": "object",
+          "description": "How the service scan was configured.",
+          "required": ["mode", "configPath", "hasConfigFile", "detectedContext", "includePaths", "ignoredPaths", "extensions", "warnings"],
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "enum": ["explicit_config", "inferred_read_only"] },
+            "configPath": { "type": "string" },
+            "hasConfigFile": { "type": "boolean" },
+            "detectedContext": { "type": "string" },
+            "includePaths": { "type": "array", "items": { "type": "string" } },
+            "ignoredPaths": { "type": "array", "items": { "type": "string" } },
+            "extensions": { "type": "array", "items": { "type": "string" } },
+            "warnings": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      },
+      "if": { "properties": { "status": { "const": "failed" } } },
+      "then": { "required": ["error"] },
+      "else": { "not": { "required": ["error"] } }
+    },
+    "integrationEdge": {
+      "type": "object",
+      "required": ["type", "fromNode", "fromFile", "fromLine", "target", "resolvedPath", "metadata", "fromService", "toService", "toNode"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["http", "script"] },
+        "fromNode": {
+          "type": "string",
+          "description": "Id of the node containing the line: method or function, `file:<relative path>` for procedural PHP outside any function and for configuration files, `::unknown` when the file has no node."
+        },
+        "fromFile": { "type": "string", "description": "Absolute path." },
+        "fromLine": { "type": "integer", "minimum": 1 },
+        "target": { "type": "string", "description": "Raw URL (http) or script path (script)." },
+        "resolvedPath": { "type": ["string", "null"], "description": "Absolute script path when it exists; null for http." },
+        "metadata": { "type": "object" },
+        "fromService": { "type": "string" },
+        "toService": { "type": ["string", "null"], "description": "Target service resolved by hostname or script path; null when external or unknown." },
+        "toNode": { "type": ["string", "null"], "description": "Handler of the call in toService: the endpoint whose path matches, or the `file:` node of a legacy PHP file; null when the URL has no path or nothing matches. Always null for script." }
+      },
+      "if": { "properties": { "type": { "const": "http" } } },
+      "then": {
+        "properties": {
+          "metadata": {
+            "type": "object",
+            "required": ["scheme", "host", "port", "path", "query", "kind"],
+            "properties": {
+              "scheme": { "type": "string" },
+              "host": { "type": "string" },
+              "port": { "type": "integer", "description": "0 when the URL has no explicit port." },
+              "path": { "type": "string" },
+              "query": { "type": "string" },
+              "kind": { "enum": ["http", "asset"], "description": "asset: static file or well-known CDN; never counted in serviceEdges." },
+              "httpMethod": { "type": "string", "description": "Only when the call site names it (Dart)." },
+              "source": { "const": "config", "description": "Present when the URL was read from a configuration file; path and query are then empty." },
+              "configKey": { "type": "string", "description": "Variable or key of the configuration line." },
+              "commented": { "const": true, "description": "Commented line of an .env example; never counted in serviceEdges." }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "metadata": {
+            "type": "object",
+            "required": ["command"],
+            "properties": { "command": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "serviceEdge": {
+      "type": "object",
+      "required": ["from", "to", "type", "count"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "type": { "enum": ["http", "script"] },
+        "count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "inconsistency": {
+      "type": "object",
+      "required": ["type", "severity", "message"],
+      "properties": {
+        "type": {
+          "enum": [
+            "SCRIPT_NOT_FOUND",
+            "SCRIPT_NOT_SCANNED",
+            "CONTRACT_DUPLICATE_ENDPOINT",
+            "CODE_DUPLICATE_ENDPOINT",
+            "CONTRACT_METHOD_SET_MISMATCH",
+            "CONTRACT_ENDPOINT_NOT_IN_CODE",
+            "CODE_ENDPOINT_NOT_IN_CONTRACT"
+          ]
+        },
+        "severity": { "enum": ["high", "medium", "low"] },
+        "message": { "type": "string" }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "required": ["type", "service", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["EMPTY_SERVICE", "SERVICE_FAILED"] },
+        "service": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

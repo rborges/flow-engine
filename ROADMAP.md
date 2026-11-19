@@ -66,10 +66,11 @@ Gaps seen while consuming the appmap from a cross-system catalog tool. Not prior
 - **Orphan suppression from external callers.** A route called only by another system is reported as
   an orphan. Accept a list of externally called routes or nodes (e.g. from the appmap or a catalog)
   and suppress those candidates, with the caller as evidence.
-- **appmap v2: data and env edges.** Emit edges for SQL table/procedure access and for URLs read from
-  environment variables, so consumers stop reimplementing URL and SQL detection with diverging rules.
-  URLs written in configuration files (`.env` examples, Laravel `config/*.php`, `.ini`) are emitted
-  since the config-file pass (`metadata.source = "config"`); variables read in code are still open.
+- **Not planned: SQL and env-variable edges.** SQL table/procedure access, ORM, environment variables
+  read in code and service names are detected by mapp (mapp ADR-0004, 2026-10-27, option C, confirmed
+  2026-11-18); porting them here would recreate two diverging rules. This engine owns HTTP between
+  services (`fromNode`, `toNode`, routes) and URLs written in configuration files
+  (`metadata.source = "config"`); mapp anchors its own evidence on node ids through `--nos`.
 - **Schedule in script topology.** Crontab entries are recognized; expose schedule and command per
   entry so a consumer can attach "when it runs" to a job.
 - **Stable evidence anchors.** Document node ids as the stable anchor for edge evidence (file and

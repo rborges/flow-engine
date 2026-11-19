@@ -3,6 +3,7 @@
 namespace Tests\Application\AppMap;
 
 use FlowEngine\Application\AppMap\ApplicationMapBuilder;
+use FlowEngine\Application\AppMap\GitRevisionReader;
 use FlowEngine\Application\AppMap\IntegrationDetector;
 use FlowEngine\Application\AppMap\ServiceInfo;
 use FlowEngine\Domain\Flow\Edge;
@@ -121,9 +122,10 @@ final class ApplicationMapBuilderTest extends TestCase
 
         $map = (new ApplicationMapBuilder())->build($services);
 
+        $orders = array_values(array_filter($map['services'], fn(array $s) => $s['name'] === 'orders'))[0];
         self::assertSame([], $map['inconsistencies']);
-        self::assertSame('failed', $map['services'][0]['status']);
-        self::assertArrayNotHasKey('contract', $map['services'][0]);
+        self::assertSame('failed', $orders['status']);
+        self::assertArrayNotHasKey('contract', $orders);
     }
 
     public function test_warns_about_empty_and_failed_services_only(): void
@@ -147,10 +149,10 @@ final class ApplicationMapBuilderTest extends TestCase
         $warnings = (new ApplicationMapBuilder())->build($services)['warnings'];
 
         self::assertSame([
-            ['type' => 'SERVICE_FAILED', 'service' => 'orders', 'message' => 'analysis failed: LogicException: boom'],
             ['type' => 'EMPTY_SERVICE', 'service' => 'billing', 'message' => 'analyzed with 0 nodes (context: python, extensions: py). Check scan.include and scan.extensions in its flow-engine.json.'],
-            ['type' => 'EMPTY_SERVICE', 'service' => 'legacy', 'message' => 'analyzed with 0 nodes. Check scan.include and scan.extensions in its flow-engine.json.'],
             ['type' => 'EMPTY_SERVICE', 'service' => 'inferred', 'message' => 'analyzed with 0 nodes (context: generic, extensions: none). No flow-engine.json was found; run init on the service to configure its scan.'],
+            ['type' => 'EMPTY_SERVICE', 'service' => 'legacy', 'message' => 'analyzed with 0 nodes. Check scan.include and scan.extensions in its flow-engine.json.'],
+            ['type' => 'SERVICE_FAILED', 'service' => 'orders', 'message' => 'analysis failed: LogicException: boom'],
         ], $warnings);
     }
 
@@ -201,5 +203,89 @@ final class ApplicationMapBuilderTest extends TestCase
 
         self::assertSame(['api-interna', 'api-prod'], array_map(fn(array $e) => $e['metadata']['host'], $map['integrationEdges']));
         self::assertSame([['from' => 'web', 'to' => 'api', 'type' => 'http', 'count' => 1]], $map['serviceEdges']);
+    }
+
+    public function test_output_order_does_not_depend_on_input_order(): void
+    {
+        $base = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow-engine-appmap-order-' . uniqid();
+        $webRoot = $base . DIRECTORY_SEPARATOR . 'web';
+        $apiRoot = $base . DIRECTORY_SEPARATOR . 'api';
+        mkdir($webRoot, 0777, true);
+        mkdir($apiRoot, 0777, true);
+
+        $first = $webRoot . DIRECTORY_SEPARATOR . 'a.php';
+        $second = $webRoot . DIRECTORY_SEPARATOR . 'b.php';
+        file_put_contents($first, "<?php\n\$u = 'http://api/orders/1';\n\$v = 'http://api/orders';\n");
+        file_put_contents($second, "<?php\n\$u = 'http://api/clients';\n");
+
+        $api = static fn (array $nodes): ServiceInfo => new ServiceInfo('api', $apiRoot, new Flow($nodes, []), [], ['api']);
+        $node = static fn (string $method, string $path): Node =>
+            new Node('Api', $method, $apiRoot . DIRECTORY_SEPARATOR . 'Api.php', 1, 'php', ['http_method' => 'GET', 'http_path' => $path]);
+        $clients = $node('clients', '/clients');
+        $orders = $node('orders', '/orders/{id}');
+        $ordersIndex = $node('ordersIndex', '/orders');
+
+        $mapA = (new ApplicationMapBuilder())->build([
+            new ServiceInfo('web', $webRoot, new Flow([], []), [$second, $first]),
+            $api([$orders, $clients, $ordersIndex]),
+        ]);
+        $mapB = (new ApplicationMapBuilder())->build([
+            $api([$ordersIndex, $clients, $orders]),
+            new ServiceInfo('web', $webRoot, new Flow([], []), [$first, $second]),
+        ]);
+
+        unset($mapA['generatedAt'], $mapB['generatedAt']);
+        self::assertSame($mapA, $mapB);
+        self::assertSame(['api', 'web'], array_column($mapA['services'], 'name'));
+        self::assertSame(['/clients', '/orders', '/orders/{id}'], array_column($mapA['services'][0]['endpoints'], 'path'));
+        self::assertSame(
+            [[$first, 2], [$first, 3], [$second, 2]],
+            array_map(fn(array $e) => [$e['fromFile'], $e['fromLine']], $mapA['integrationEdges'])
+        );
+        self::assertSame('2.0', $mapA['schemaVersion']);
+        self::assertNull($mapA['services'][0]['commitSha']);
+
+        array_map('unlink', [$first, $second]);
+        array_map('rmdir', [$webRoot, $apiRoot, $base]);
+    }
+
+    public function test_call_without_method_resolves_to_get_when_verbs_share_a_route(): void
+    {
+        $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow-engine-appmap-verbs-' . uniqid();
+        mkdir($root, 0777, true);
+        $file = $root . DIRECTORY_SEPARATOR . 'a.php';
+        file_put_contents($file, "<?php\n\$u = 'http://api/orders/1';\n");
+
+        $verb = static fn (string $method, string $handler): Node =>
+            new Node('Orders', $handler, $root . DIRECTORY_SEPARATOR . 'Orders.php', 1, 'php', ['http_method' => $method, 'http_path' => '/orders/{id}']);
+        $api = new ServiceInfo('api', $root, new Flow([$verb('DELETE', 'destroy'), $verb('PUT', 'update'), $verb('GET', 'show')], []), [], ['api']);
+        $web = new ServiceInfo('web', $root, new Flow([], []), [$file]);
+
+        $map = (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build([$web, $api]);
+
+        self::assertSame('Orders::show', $map['integrationEdges'][0]['toNode']);
+        self::assertSame(['GET', 'PUT', 'DELETE'], array_column($map['services'][0]['endpoints'], 'method'));
+
+        unlink($file);
+        rmdir($root);
+    }
+
+    public function test_service_edges_are_ordered_field_by_field(): void
+    {
+        $root = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow-engine-appmap-edges-' . uniqid();
+        mkdir($root, 0777, true);
+        $file = $root . DIRECTORY_SEPARATOR . 'a.php';
+        file_put_contents($file, "<?php\n\$a = 'http://api2/x';\n\$b = 'http://api/x';\n");
+
+        $map = (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build([
+            new ServiceInfo('web', $root, new Flow([], []), [$file]),
+            new ServiceInfo('api2', $root, new Flow([], []), [], ['api2']),
+            new ServiceInfo('api', $root, new Flow([], []), [], ['api']),
+        ]);
+
+        self::assertSame(['api', 'api2'], array_column($map['serviceEdges'], 'to'));
+
+        unlink($file);
+        rmdir($root);
     }
 }

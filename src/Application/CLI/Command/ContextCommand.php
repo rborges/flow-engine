@@ -4,6 +4,7 @@ namespace FlowEngine\Application\CLI\Command;
 
 use FlowEngine\AI\Export\ExportOptions;
 use FlowEngine\Application\AppMap\ApplicationMapBuilder;
+use FlowEngine\Application\AppMap\GitRevisionReader;
 use FlowEngine\Bootstrap\CatalogServiceBuilder;
 use FlowEngine\Bootstrap\Container;
 use FlowEngine\Bootstrap\InfraServices;
@@ -134,7 +135,7 @@ final class ContextCommand implements Command
 
         $services = (new CatalogServiceBuilder())->buildFromEntries($entries);
 
-        return (new ApplicationMapBuilder())->build($services);
+        return (new ApplicationMapBuilder(revisions: GitRevisionReader::disabled()))->build($services);
     }
 
     /**
